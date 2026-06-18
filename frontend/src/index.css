@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  min-height: 100vh;
+}
+
+.card {
+  @apply rounded-lg border border-dungeon-600 bg-dungeon-800 p-4 shadow-lg;
+}
+
+.btn {
+  @apply rounded-md px-4 py-2 font-medium transition-colors disabled:opacity-50;
+}
+
+.btn-primary {
+  @apply btn bg-dungeon-500 text-dungeon-900 hover:bg-dungeon-400;
+}
+
+.btn-secondary {
+  @apply btn border border-dungeon-600 bg-dungeon-700 hover:bg-dungeon-600;
+}
+
+.btn-danger {
+  @apply btn bg-red-800 hover:bg-red-700;
+}
+
+.input {
+  @apply w-full rounded-md border border-dungeon-600 bg-dungeon-900 px-3 py-2 text-stone-100;
+}
+
+.label {
+  @apply mb-1 block text-sm text-stone-400;
+}

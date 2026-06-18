@@ -1,0 +1,140 @@
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.auth import require_master
+from app.database import get_db
+from app.models import Campaign, CampaignEventNode, EventHistory, EventTemplate, User
+from app.schemas import AdvanceCampaignRequest, RewardsRequest
+from app.services.campaign_engine import (
+    apply_rest_to_party,
+    apply_rewards_and_punishments,
+    broadcast_campaign_state,
+    campaign_state_payload,
+)
+from app.websocket.manager import ws_manager
+
+router = APIRouter(prefix="/campaigns", tags=["campaign_runtime"])
+
+
+@router.get("/{campaign_id}/state")
+def get_state(
+    campaign_id: int,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign_state_payload(db, campaign)
+
+
+@router.post("/{campaign_id}/advance")
+async def advance_campaign(
+    campaign_id: int,
+    payload: AdvanceCampaignRequest,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    node = db.get(CampaignEventNode, payload.node_id)
+    if not node or node.campaign_id != campaign_id:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    prev_node_id = campaign.current_node_id
+    history = EventHistory(
+        campaign_id=campaign_id,
+        node_id=prev_node_id,
+        outcome=payload.outcome,
+        master_notes=payload.master_notes,
+    )
+    db.add(history)
+
+    if payload.apply_rest:
+        apply_rest_to_party(db, campaign)
+
+    campaign.current_node_id = payload.node_id
+    if campaign.status == "draft":
+        campaign.status = "active"
+    db.commit()
+
+    await ws_manager.broadcast(
+        campaign_id,
+        {
+            "type": "history_added",
+            "data": {
+                "outcome": payload.outcome,
+                "master_notes": payload.master_notes,
+                "node_id": prev_node_id,
+            },
+        },
+    )
+    await ws_manager.broadcast(
+        campaign_id,
+        {
+            "type": "event_advanced",
+            "data": {"node_id": payload.node_id},
+        },
+    )
+    await broadcast_campaign_state(db, campaign_id)
+    return campaign_state_payload(db, campaign)
+
+
+@router.post("/{campaign_id}/rewards")
+async def apply_rewards(
+    campaign_id: int,
+    payload: RewardsRequest,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    apply_rewards_and_punishments(db, campaign, payload.rewards, payload.punishments, master.id)
+    db.commit()
+    await broadcast_campaign_state(db, campaign_id)
+    return {"ok": True}
+
+
+@router.get("/{campaign_id}/history")
+def get_history(
+    campaign_id: int,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    entries = (
+        db.query(EventHistory)
+        .filter(EventHistory.campaign_id == campaign_id)
+        .order_by(EventHistory.timestamp.desc())
+        .all()
+    )
+    result = []
+    for e in entries:
+        node_label = None
+        event_name = None
+        if e.node_id:
+            node = db.get(CampaignEventNode, e.node_id)
+            if node:
+                node_label = node.label
+                template = db.get(EventTemplate, node.event_template_id)
+                event_name = template.name if template else None
+        result.append(
+            {
+                "id": e.id,
+                "node_id": e.node_id,
+                "node_label": node_label,
+                "event_name": event_name,
+                "outcome": e.outcome,
+                "master_notes": e.master_notes,
+                "rewards_json": e.rewards_json,
+                "punishments_json": e.punishments_json,
+                "timestamp": e.timestamp.isoformat(),
+            }
+        )
+    return result
