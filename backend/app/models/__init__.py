@@ -221,6 +221,16 @@ class EnemyTemplate(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class BattlePreset(Base):
+    __tablename__ = "battle_presets"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    enemies: Mapped[list] = mapped_column(JSON, default=list)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Battle(Base):
     __tablename__ = "battles"
 

@@ -1,3 +1,4 @@
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,10 +6,24 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_master
 from app.database import get_db
-from app.models import EnemyTemplate, User
-from app.schemas import EnemyTemplateCreate, EnemyTemplateOut
+from app.models import BattlePreset, EnemyTemplate, User
+from app.schemas import BattlePresetCreate, BattlePresetOut, EnemyTemplateCreate, EnemyTemplateOut
 
 router = APIRouter(prefix="/enemies", tags=["enemies"])
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return slug or "preset"
+
+
+def _unique_preset_id(db: Session, base: str) -> str:
+    candidate = base
+    n = 2
+    while db.get(BattlePreset, candidate):
+        candidate = f"{base}_{n}"
+        n += 1
+    return candidate
 
 
 @router.get("", response_model=list[EnemyTemplateOut])
@@ -40,9 +55,9 @@ def update_enemy(
     db: Annotated[Session, Depends(get_db)],
 ) -> EnemyTemplateOut:
     enemy = db.get(EnemyTemplate, enemy_id)
-    if not enemy or enemy.is_system:
-        raise HTTPException(status_code=400, detail="Cannot edit system enemy")
-    if enemy.master_id != master.id:
+    if not enemy:
+        raise HTTPException(status_code=404, detail="Enemy not found")
+    if not enemy.is_system and enemy.master_id != master.id:
         raise HTTPException(status_code=404, detail="Enemy not found")
     for k, v in payload.model_dump().items():
         setattr(enemy, k, v)
@@ -67,8 +82,65 @@ def delete_enemy(
     return {"ok": True}
 
 
-@router.get("/presets")
-def list_presets() -> list[dict[str, Any]]:
-    from app.services.battle_engine import BATTLE_PRESETS
+@router.get("/presets", response_model=list[BattlePresetOut])
+def list_presets(
+    _: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[BattlePresetOut]:
+    return db.query(BattlePreset).order_by(BattlePreset.name).all()
 
-    return [{"id": k, **v} for k, v in BATTLE_PRESETS.items()]
+
+@router.post("/presets", response_model=BattlePresetOut)
+def create_preset(
+    payload: BattlePresetCreate,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BattlePresetOut:
+    base_id = payload.preset_id or _slugify(payload.name)
+    preset_id = _unique_preset_id(db, base_id)
+    preset = BattlePreset(
+        id=preset_id,
+        name=payload.name,
+        enemies=[e.model_dump() for e in payload.enemies],
+        master_id=master.id,
+        is_system=False,
+    )
+    db.add(preset)
+    db.commit()
+    db.refresh(preset)
+    return preset
+
+
+@router.patch("/presets/{preset_id}", response_model=BattlePresetOut)
+def update_preset(
+    preset_id: str,
+    payload: BattlePresetCreate,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BattlePresetOut:
+    preset = db.get(BattlePreset, preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    if not preset.is_system and preset.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    preset.name = payload.name
+    preset.enemies = [e.model_dump() for e in payload.enemies]
+    db.commit()
+    db.refresh(preset)
+    return preset
+
+
+@router.delete("/presets/{preset_id}")
+def delete_preset(
+    preset_id: str,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    preset = db.get(BattlePreset, preset_id)
+    if not preset or preset.is_system:
+        raise HTTPException(status_code=400, detail="Cannot delete system preset")
+    if preset.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    db.delete(preset)
+    db.commit()
+    return {"ok": True}

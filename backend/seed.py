@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 
 from app.game.constants import LEGACY_EQUIP_SLOTS
-from app.models import EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate
+from app.models import BattlePreset, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate
+from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
 
 BASE_ITEMS = [
     ("Iron Sword", "weapon", 1, {"damage": 4}, "A reliable blade."),
@@ -46,6 +47,25 @@ def _ensure_system_items(db: Session) -> None:
             db.add(ItemTemplate(name=name, item_type=itype, tier=tier, stats=stats, description=desc, is_system=True))
 
 
+def _ensure_system_enemies(db: Session) -> None:
+    existing = {row.name for row in db.query(EnemyTemplate).filter(EnemyTemplate.is_system == True).all()}  # noqa: E712
+    for name, stats, desc in BASE_ENEMIES:
+        if name not in existing:
+            db.add(EnemyTemplate(name=name, stats=stats, description=desc, is_system=True))
+
+
+def _ensure_system_presets(db: Session) -> None:
+    existing = {row.id for row in db.query(BattlePreset).all()}
+    for preset_id, data in DEFAULT_BATTLE_PRESETS.items():
+        if preset_id not in existing:
+            db.add(BattlePreset(
+                id=preset_id,
+                name=data["name"],
+                enemies=data["enemies"],
+                is_system=True,
+            ))
+
+
 def seed_data(db: Session) -> None:
     if db.query(EventTemplate).filter(EventTemplate.is_generic == True).count() == 0:  # noqa: E712
         generic_events = [
@@ -59,10 +79,8 @@ def seed_data(db: Session) -> None:
             db.add(EventTemplate(name=name, description=desc, event_type=etype, is_generic=True, master_id=None))
 
     _ensure_system_items(db)
-
-    if db.query(EnemyTemplate).filter(EnemyTemplate.is_system == True).count() == 0:  # noqa: E712
-        for name, stats, desc in BASE_ENEMIES:
-            db.add(EnemyTemplate(name=name, stats=stats, description=desc, is_system=True))
+    _ensure_system_enemies(db)
+    _ensure_system_presets(db)
 
     migrate_legacy_equipment(db)
     db.commit()

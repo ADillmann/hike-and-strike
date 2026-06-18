@@ -238,6 +238,28 @@ class EnemyTemplateOut(BaseModel):
         from_attributes = True
 
 
+class PresetEnemyEntry(BaseModel):
+    template_name: str
+    count: int = 1
+    power_scale: float = 1.0
+
+
+class BattlePresetCreate(BaseModel):
+    name: str
+    enemies: list[PresetEnemyEntry] = Field(default_factory=list)
+    preset_id: str | None = None
+
+
+class BattlePresetOut(BaseModel):
+    id: str
+    name: str
+    enemies: list[dict[str, Any]]
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
 class EnemySpec(BaseModel):
     template_id: int
     count: int = 1

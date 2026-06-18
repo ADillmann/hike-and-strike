@@ -304,20 +304,3 @@ def sync_party_hp_to_characters(db: Session, state: dict[str, Any]) -> None:
                 skill = db.get(Skill, skill_data["id"])
                 if skill:
                     skill.uses_remaining = skill_data["uses_remaining"]
-
-
-BATTLE_PRESETS = {
-    "goblin_crowd": {
-        "name": "Goblin Crowd with Goblin King",
-        "enemies": [
-            {"template_name": "Goblin", "count": 4, "power_scale": 1.0},
-            {"template_name": "Goblin King", "count": 1, "power_scale": 1.0},
-        ],
-    },
-    "bandit_ambush": {
-        "name": "Bandit Ambush",
-        "enemies": [
-            {"template_name": "Bandit", "count": 3, "power_scale": 1.0},
-        ],
-    },
-}

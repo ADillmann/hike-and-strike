@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_master
 from app.database import get_db
-from app.models import Battle, Campaign, Character, EnemyTemplate, GroupMember, User, UserRole
+from app.models import Battle, Campaign, Character, GroupMember, User, UserRole
 from app.schemas import BattleActionRequest, BattleCreateRequest
+from app.services.battle_presets import resolve_preset_enemy_specs
 from app.services.battle_engine import (
-    BATTLE_PRESETS,
     build_battle_state,
     end_battle,
     perform_action,
@@ -47,18 +47,9 @@ def _get_battle(db: Session, battle_id: int, user: User) -> Battle:
 
 def _resolve_enemy_specs(db: Session, payload: BattleCreateRequest) -> list[dict]:
     if payload.preset:
-        preset = BATTLE_PRESETS.get(payload.preset)
-        if not preset:
+        specs = resolve_preset_enemy_specs(db, payload.preset)
+        if not specs:
             raise HTTPException(status_code=400, detail="Unknown preset")
-        specs = []
-        for entry in preset["enemies"]:
-            template = db.query(EnemyTemplate).filter(EnemyTemplate.name == entry["template_name"]).first()
-            if template:
-                specs.append({
-                    "template_id": template.id,
-                    "count": entry.get("count", 1),
-                    "power_scale": entry.get("power_scale", 1.0),
-                })
         return specs
     return [s.model_dump() for s in payload.enemies]
 
