@@ -45,9 +45,9 @@ def update_event(
     db: Annotated[Session, Depends(get_db)],
 ) -> EventTemplateOut:
     event = db.get(EventTemplate, event_id)
-    if not event or event.is_generic:
-        raise HTTPException(status_code=400, detail="Cannot edit generic/system event")
-    if event.master_id != master.id:
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if not event.is_generic and event.master_id != master.id:
         raise HTTPException(status_code=404, detail="Event not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(event, k, v)

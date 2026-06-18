@@ -161,12 +161,12 @@ export default function EventsPage() {
                     ))}
                   </div>
                 )}
-                {!ev.is_generic && (
-                  <div className="mt-2 flex gap-1">
-                    <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => setEditing({ ...ev, images: ev.images || [] })}>Edit</button>
+                <div className="mt-2 flex gap-1">
+                  <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => setEditing({ ...ev, images: ev.images || [] })}>Edit</button>
+                  {!ev.is_generic && (
                     <button className="btn-danger px-2 py-0.5 text-xs" onClick={() => setDeleteId(ev.id)}>Delete</button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -176,7 +176,10 @@ export default function EventsPage() {
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="card max-w-lg w-full max-h-[80vh] overflow-y-auto space-y-3">
-            <h3 className="font-semibold">Edit Event</h3>
+            <h3 className="font-semibold">
+              Edit Event
+              {editing.is_generic && <span className="ml-2 text-sm font-normal text-dungeon-400">(base event)</span>}
+            </h3>
             <input className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             <textarea className="input min-h-24" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
             <select className="input" value={editing.event_type} onChange={(e) => setEditing({ ...editing, event_type: e.target.value })}>
