@@ -168,10 +168,13 @@ def apply_rewards_and_punishments(
             character = db.get(Character, char_id)
             if not character:
                 continue
-            if entry.get("half"):
-                character.current_hp = max(1, character.current_hp // 2)
-            elif "amount" in entry:
-                character.current_hp = max(0, character.current_hp - entry["amount"])
+            if "amount" in entry:
+                delta = entry["amount"]
+                if isinstance(delta, (int, float)):
+                    character.current_hp = max(
+                        0,
+                        min(character.max_hp, character.current_hp + int(delta)),
+                    )
         for entry in punishments.get("temp_debuffs", []):
             char_id = entry.get("character_id")
             if char_id:

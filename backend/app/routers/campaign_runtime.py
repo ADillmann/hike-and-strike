@@ -51,8 +51,8 @@ async def advance_campaign(
 
     target_template = db.get(EventTemplate, node.event_template_id)
     apply_rest = payload.apply_rest
-    if target_template and target_template.event_type in ("rest", "generic"):
-        apply_rest = True
+    if target_template and target_template.event_type != "rest":
+        apply_rest = False
 
     if payload.rewards or payload.punishments:
         apply_rewards_and_punishments(

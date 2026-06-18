@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { ConfirmDialog } from './ConfirmDialog';
 
 export interface RewardsPayload {
   rewards?: Record<string, unknown>;
@@ -9,6 +10,8 @@ export interface RewardsPayload {
 interface PartyMember {
   id: number;
   name: string;
+  current_hp?: number;
+  max_hp?: number;
 }
 
 interface Item {
@@ -24,6 +27,15 @@ interface InvItem {
 }
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
+
+type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'remove';
+
+interface PendingRewardConfirm {
+  action: RewardConfirmAction;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+}
 
 export function RewardsPanel({
   campaignId,
@@ -49,8 +61,8 @@ export function RewardsPanel({
   const [buffValue, setBuffValue] = useState(1);
   const [buffCharId, setBuffCharId] = useState(0);
   const [hpCharId, setHpCharId] = useState(0);
-  const [hpHalf, setHpHalf] = useState(true);
-  const [hpAmount, setHpAmount] = useState(5);
+  const [hpChange, setHpChange] = useState(-5);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingRewardConfirm | null>(null);
   const [removeCharId, setRemoveCharId] = useState(0);
   const [removeInvId, setRemoveInvId] = useState(0);
   const [charInventory, setCharInventory] = useState<InvItem[]>([]);
@@ -77,25 +89,25 @@ export function RewardsPanel({
     onApplied?.();
   };
 
-  const grantItem = () => {
+  const grantItem = async () => {
     const targets = wholeParty ? party.map((p) => p.id) : [rewardCharId];
-    apply({
+    await apply({
       rewards: {
         items: targets.map((character_id) => ({ character_id, item_template_id: rewardItemId })),
       },
     });
   };
 
-  const grantRandom = () => {
-    apply({
+  const grantRandom = async () => {
+    await apply({
       rewards: {
         random_tier: [{ tier: randomTier, count: randomCount, character_ids: party.map((p) => p.id) }],
       },
     });
   };
 
-  const grantBuff = () => {
-    apply({
+  const grantBuff = async () => {
+    await apply({
       rewards: {
         temp_buffs: [{
           character_id: buffCharId,
@@ -107,8 +119,8 @@ export function RewardsPanel({
     });
   };
 
-  const grantDebuff = () => {
-    apply({
+  const grantDebuff = async () => {
+    await apply({
       punishments: {
         temp_debuffs: [{
           character_id: buffCharId,
@@ -120,20 +132,128 @@ export function RewardsPanel({
     });
   };
 
-  const punishHp = () => {
-    apply({
+  const applyHpChange = async () => {
+    if (hpChange === 0) return;
+    await apply({
       punishments: {
-        hp_reduction: [{
-          character_id: hpCharId,
-          ...(hpHalf ? { half: true } : { amount: hpAmount }),
-        }],
+        hp_reduction: [{ character_id: hpCharId, amount: hpChange }],
       },
     });
   };
 
-  const removeItem = () => {
+  const removeItem = async () => {
     if (!removeInvId) return;
-    apply({ punishments: { remove_items: [{ inventory_item_id: removeInvId }] } });
+    await apply({ punishments: { remove_items: [{ inventory_item_id: removeInvId }] } });
+  };
+
+  const selectedHpMember = party.find((p) => p.id === hpCharId);
+  const previewHp =
+    selectedHpMember?.current_hp != null && selectedHpMember.max_hp != null
+      ? Math.max(0, Math.min(selectedHpMember.max_hp, selectedHpMember.current_hp + hpChange))
+      : null;
+
+  const requestItemConfirm = () => {
+    const item = items.find((i) => i.id === rewardItemId);
+    const itemName = item?.name ?? 'item';
+    if (wholeParty) {
+      setPendingConfirm({
+        action: 'item',
+        title: 'Grant Item',
+        message: `Grant "${itemName}" to the whole party (${party.length} characters)?`,
+        confirmLabel: 'Grant',
+      });
+      return;
+    }
+    const character = party.find((p) => p.id === rewardCharId);
+    setPendingConfirm({
+      action: 'item',
+      title: 'Grant Item',
+      message: `Grant "${itemName}" to ${character?.name ?? 'character'}?`,
+      confirmLabel: 'Grant',
+    });
+  };
+
+  const requestRandomConfirm = () => {
+    setPendingConfirm({
+      action: 'random',
+      title: 'Grant Random Loot',
+      message: `Grant tier ${randomTier} random loot (${randomCount} each) to all party members?`,
+      confirmLabel: 'Grant',
+    });
+  };
+
+  const requestBuffConfirm = () => {
+    const character = party.find((p) => p.id === buffCharId);
+    const label = buffLabel || 'Buff';
+    const sign = tab === 'buff' ? '+' : '-';
+    const value = Math.abs(buffValue);
+    setPendingConfirm({
+      action: tab === 'buff' ? 'buff' : 'debuff',
+      title: tab === 'buff' ? 'Apply Buff' : 'Apply Debuff',
+      message: `Apply ${label} (${sign}${value} ${buffStat}) to ${character?.name ?? 'character'}?`,
+      confirmLabel: 'Apply',
+    });
+  };
+
+  const requestHpConfirm = () => {
+    if (hpChange === 0) return;
+    const hpConfirmMessage = selectedHpMember
+      ? hpChange > 0
+        ? `Restore ${hpChange} HP to ${selectedHpMember.name}?${
+            previewHp != null
+              ? ` (${selectedHpMember.current_hp}/${selectedHpMember.max_hp} → ${previewHp}/${selectedHpMember.max_hp})`
+              : ''
+          }`
+        : `Reduce ${selectedHpMember.name}'s HP by ${Math.abs(hpChange)}?${
+            previewHp != null
+              ? ` (${selectedHpMember.current_hp}/${selectedHpMember.max_hp} → ${previewHp}/${selectedHpMember.max_hp})`
+              : ''
+          }`
+      : 'Apply HP change?';
+    setPendingConfirm({
+      action: 'hp',
+      title: 'Apply HP Change',
+      message: hpConfirmMessage,
+      confirmLabel: 'Apply',
+    });
+  };
+
+  const requestRemoveConfirm = () => {
+    if (!removeInvId) return;
+    const character = party.find((p) => p.id === removeCharId);
+    const item = charInventory.find((i) => i.id === removeInvId);
+    setPendingConfirm({
+      action: 'remove',
+      title: 'Remove Item',
+      message: `Remove "${item?.name ?? 'item'}" from ${character?.name ?? 'character'}'s inventory?`,
+      confirmLabel: 'Remove',
+    });
+  };
+
+  const confirmPending = async () => {
+    if (!pendingConfirm) return;
+    const { action } = pendingConfirm;
+    setPendingConfirm(null);
+    switch (action) {
+      case 'item':
+        await grantItem();
+        break;
+      case 'random':
+        await grantRandom();
+        break;
+      case 'buff':
+        await grantBuff();
+        break;
+      case 'debuff':
+        await grantDebuff();
+        break;
+      case 'hp':
+        await applyHpChange();
+        break;
+      case 'remove':
+        await removeItem();
+        break;
+    }
   };
 
   const tabs = [
@@ -174,7 +294,7 @@ export function RewardsPanel({
           <select className="input" value={rewardItemId} onChange={(e) => setRewardItemId(+e.target.value)}>
             {items.map((i) => <option key={i.id} value={i.id}>{i.name} (T{i.tier})</option>)}
           </select>
-          <button className="btn-secondary w-full" onClick={grantItem}>Grant Item</button>
+          <button className="btn-secondary w-full" onClick={requestItemConfirm}>Grant Item</button>
         </div>
       )}
 
@@ -190,7 +310,7 @@ export function RewardsPanel({
               <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
             </div>
           </div>
-          <button className="btn-secondary w-full" onClick={grantRandom}>Grant Random Loot</button>
+          <button className="btn-secondary w-full" onClick={requestRandomConfirm}>Grant Random Loot</button>
         </div>
       )}
 
@@ -206,7 +326,7 @@ export function RewardsPanel({
             </select>
             <input className="input" type="number" value={buffValue} onChange={(e) => setBuffValue(+e.target.value)} />
           </div>
-          <button className={tab === 'buff' ? 'btn-secondary w-full' : 'btn-danger w-full'} onClick={tab === 'buff' ? grantBuff : grantDebuff}>
+          <button className={tab === 'buff' ? 'btn-secondary w-full' : 'btn-danger w-full'} onClick={requestBuffConfirm}>
             Apply {tab === 'buff' ? 'Buff' : 'Debuff'}
           </button>
         </div>
@@ -215,17 +335,49 @@ export function RewardsPanel({
       {tab === 'hp' && (
         <div className="space-y-2">
           <select className="input" value={hpCharId} onChange={(e) => setHpCharId(+e.target.value)}>
-            {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {party.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.current_hp != null && p.max_hp != null ? ` (HP ${p.current_hp}/${p.max_hp})` : ''}
+              </option>
+            ))}
           </select>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={hpHalf} onChange={(e) => setHpHalf(e.target.checked)} />
-            Half HP
-          </label>
-          {!hpHalf && (
-            <input className="input" type="number" min={1} value={hpAmount} onChange={(e) => setHpAmount(+e.target.value)} placeholder="Damage amount" />
+          {selectedHpMember?.current_hp != null && selectedHpMember.max_hp != null && (
+            <p className="text-sm text-dungeon-300">
+              {selectedHpMember.name}: HP {selectedHpMember.current_hp} / {selectedHpMember.max_hp}
+            </p>
           )}
-          <button className="btn-danger w-full" onClick={punishHp}>Apply HP Punishment</button>
+          <div>
+            <label className="label">HP change</label>
+            <input
+              className="input"
+              type="number"
+              value={hpChange}
+              onChange={(e) => setHpChange(+e.target.value)}
+              placeholder="e.g. -5 damage, +5 heal"
+            />
+            <p className="mt-1 text-xs text-stone-500">
+              Negative reduces current HP; positive restores HP (capped at max). Does not change max HP.
+            </p>
+          </div>
+          <button
+            className={hpChange >= 0 ? 'btn-secondary w-full' : 'btn-danger w-full'}
+            onClick={requestHpConfirm}
+            disabled={hpChange === 0}
+          >
+            Apply HP Change
+          </button>
         </div>
+      )}
+
+      {pendingConfirm && (
+        <ConfirmDialog
+          title={pendingConfirm.title}
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          onConfirm={confirmPending}
+          onCancel={() => setPendingConfirm(null)}
+        />
       )}
 
       {tab === 'remove' && (
@@ -237,7 +389,7 @@ export function RewardsPanel({
             <option value={0}>Select item...</option>
             {charInventory.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
-          <button className="btn-danger w-full" onClick={removeItem} disabled={!removeInvId}>Remove Item</button>
+          <button className="btn-danger w-full" onClick={requestRemoveConfirm} disabled={!removeInvId}>Remove Item</button>
         </div>
       )}
     </div>

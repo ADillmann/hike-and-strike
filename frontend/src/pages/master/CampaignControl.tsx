@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
 import { Layout, StatEditor } from '../../components/Layout';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 
@@ -45,6 +46,7 @@ export default function CampaignControlPage() {
   const [activeBattleId, setActiveBattleId] = useState<number | null>(null);
   const [editChar, setEditChar] = useState<Character | null>(null);
   const [editStats, setEditStats] = useState<Record<string, number>>({});
+  const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
 
   const load = useCallback(() => {
     if (!campaignId) return;
@@ -76,9 +78,7 @@ export default function CampaignControlPage() {
 
   useEffect(() => {
     const target = nodes.find((n) => n.id === nextNodeId);
-    if (target && (target.event_type === 'rest' || target.event_type === 'generic')) {
-      setApplyRest(true);
-    }
+    setApplyRest(target?.event_type === 'rest');
   }, [nextNodeId, nodes]);
 
   const advance = async () => {
@@ -93,6 +93,7 @@ export default function CampaignControlPage() {
     await api.post(`/campaigns/${campaignId}/advance`, payload);
     setNotes('');
     setAdvanceRewards({});
+    setAdvanceConfirmOpen(false);
     load();
   };
 
@@ -132,6 +133,11 @@ export default function CampaignControlPage() {
   if (!state) return <Layout title="Campaign Control">Loading...</Layout>;
 
   const targetNode = nodes.find((n) => n.id === nextNodeId);
+  const advanceConfirmMessage = [
+    `Record "${state.current_node?.event.name || 'current event'}" as ${outcome} and move the party to "${targetNode?.event_name || 'selected event'}"?`,
+    applyRest && targetNode?.event_type === 'rest' ? 'Rest will be applied.' : null,
+    advanceRewards.rewards || advanceRewards.punishments ? 'Attached rewards/punishments will also be applied.' : null,
+  ].filter(Boolean).join(' ');
 
   return (
     <Layout title={`Campaign: ${state.name}`}>
@@ -200,24 +206,32 @@ export default function CampaignControlPage() {
 
         <section className="card lg:col-span-2">
           <h2 className="mb-2 font-semibold text-dungeon-300">Advance Event</h2>
+          <p className="mb-2 text-xs text-stone-500">
+            Record how the party resolved <span className="text-dungeon-400">{state.current_node?.event.name || 'the current event'}</span>, then move to the next event.
+          </p>
           <div className="grid gap-2 sm:grid-cols-2">
-            <select className="input" value={nextNodeId || state.current_node?.node_id || 0} onChange={(e) => setNextNodeId(+e.target.value)}>
-              {nodes.map((n) => <option key={n.id} value={n.id}>{n.event_name} ({n.event_type})</option>)}
-            </select>
-            <select className="input" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-              <option value="success">Success</option>
-              <option value="failure">Failure</option>
-              <option value="partial">Partial</option>
-            </select>
+            <div>
+              <label className="label">Next event</label>
+              <select className="input" value={nextNodeId || state.current_node?.node_id || 0} onChange={(e) => setNextNodeId(+e.target.value)}>
+                {nodes.map((n) => <option key={n.id} value={n.id}>{n.event_name} ({n.event_type})</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Outcome (current event)</label>
+              <select className="input" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+                <option value="success">Success</option>
+                <option value="failure">Failure</option>
+                <option value="partial">Partial</option>
+              </select>
+            </div>
           </div>
-          {targetNode && (targetNode.event_type === 'rest' || targetNode.event_type === 'generic') && (
-            <p className="mt-1 text-xs text-dungeon-400">Rest will auto-apply when advancing to this event.</p>
+          <textarea className="input mt-2 min-h-16" placeholder="Master notes (current event)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          {targetNode?.event_type === 'rest' && (
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={applyRest} onChange={(e) => setApplyRest(e.target.checked)} />
+              Apply rest (refill skills, clear rest debuffs)
+            </label>
           )}
-          <textarea className="input mt-2 min-h-16" placeholder="Master notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          <label className="mt-2 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={applyRest} onChange={(e) => setApplyRest(e.target.checked)} />
-            Apply rest (refill skills, clear rest debuffs)
-          </label>
           <details className="mt-2">
             <summary className="cursor-pointer text-sm text-dungeon-400">Attach rewards/punishments to this advance</summary>
             <div className="mt-2 space-y-2 rounded border border-dungeon-600 p-2 text-sm">
@@ -225,7 +239,7 @@ export default function CampaignControlPage() {
               <AdvanceRewardBuilder party={state.party} items={items} onChange={setAdvanceRewards} />
             </div>
           </details>
-          <button className="btn-primary mt-2" onClick={advance}>Go to Next Event</button>
+          <button className="btn-primary mt-2" onClick={() => setAdvanceConfirmOpen(true)}>Go to Next Event</button>
         </section>
 
         <section className="card lg:col-span-3">
@@ -242,6 +256,16 @@ export default function CampaignControlPage() {
           </div>
         </section>
       </div>
+
+      {advanceConfirmOpen && (
+        <ConfirmDialog
+          title="Go to Next Event"
+          message={advanceConfirmMessage}
+          confirmLabel="Advance"
+          onConfirm={advance}
+          onCancel={() => setAdvanceConfirmOpen(false)}
+        />
+      )}
 
       {editChar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -363,44 +387,171 @@ function AdvanceRewardBuilder({
   items,
   onChange,
 }: {
-  party: { id: number; name: string }[];
+  party: { id: number; name: string; current_hp?: number; max_hp?: number }[];
   items: Item[];
   onChange: (payload: RewardsPayload) => void;
 }) {
-  const [rewardType, setRewardType] = useState<'item' | 'random' | 'halfhp'>('item');
+  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp'>('item');
   const [charId, setCharId] = useState(party[0]?.id || 0);
   const [itemId, setItemId] = useState(items[0]?.id || 0);
+  const [randomWholeParty, setRandomWholeParty] = useState(true);
+  const [randomCharId, setRandomCharId] = useState(party[0]?.id || 0);
   const [tier, setTier] = useState(1);
+  const [randomCount, setRandomCount] = useState(1);
+  const [hpWholeParty, setHpWholeParty] = useState(false);
+  const [hpChange, setHpChange] = useState(-5);
+
+  useEffect(() => {
+    if (party[0]) {
+      setCharId(party[0].id);
+      setRandomCharId(party[0].id);
+    }
+    if (items[0]) setItemId(items[0].id);
+  }, [party, items]);
+
+  const selectedMember = party.find((p) => p.id === charId);
+  const selectedRandomMember = party.find((p) => p.id === randomCharId);
 
   useEffect(() => {
     if (rewardType === 'item' && charId && itemId) {
       onChange({ rewards: { items: [{ character_id: charId, item_template_id: itemId }] } });
-    } else if (rewardType === 'random') {
-      onChange({ rewards: { random_tier: [{ tier, count: 1, character_ids: party.map((p) => p.id) }] } });
-    } else if (rewardType === 'halfhp') {
-      onChange({ punishments: { hp_reduction: [{ character_id: charId, half: true }] } });
+      return;
     }
-  }, [rewardType, charId, itemId, tier, party, onChange]);
+    if (rewardType === 'random') {
+      const targets = randomWholeParty ? party.map((p) => p.id) : [randomCharId].filter(Boolean);
+      if (targets.length) {
+        onChange({
+          rewards: { random_tier: [{ tier, count: randomCount, character_ids: targets }] },
+        });
+      } else {
+        onChange({});
+      }
+      return;
+    }
+    if (rewardType === 'hp' && hpChange !== 0) {
+      const targets = hpWholeParty ? party.map((p) => p.id) : [charId].filter(Boolean);
+      if (targets.length) {
+        onChange({
+          punishments: {
+            hp_reduction: targets.map((character_id) => ({ character_id, amount: hpChange })),
+          },
+        });
+      } else {
+        onChange({});
+      }
+      return;
+    }
+    onChange({});
+  }, [
+    rewardType,
+    charId,
+    itemId,
+    tier,
+    randomCount,
+    randomWholeParty,
+    randomCharId,
+    hpWholeParty,
+    hpChange,
+    party,
+    onChange,
+  ]);
 
   return (
     <div className="space-y-2">
       <select className="input" value={rewardType} onChange={(e) => setRewardType(e.target.value as typeof rewardType)}>
         <option value="item">Grant item</option>
         <option value="random">Random tier loot</option>
-        <option value="halfhp">Half HP punishment</option>
+        <option value="hp">HP change</option>
       </select>
-      {(rewardType === 'item' || rewardType === 'halfhp') && (
-        <select className="input" value={charId} onChange={(e) => setCharId(+e.target.value)}>
-          {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      )}
+
       {rewardType === 'item' && (
-        <select className="input" value={itemId} onChange={(e) => setItemId(+e.target.value)}>
-          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-        </select>
+        <>
+          <select className="input" value={charId} onChange={(e) => setCharId(+e.target.value)}>
+            {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select className="input" value={itemId} onChange={(e) => setItemId(+e.target.value)}>
+            {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+        </>
       )}
+
       {rewardType === 'random' && (
-        <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={randomWholeParty} onChange={(e) => setRandomWholeParty(e.target.checked)} />
+            Whole party
+          </label>
+          {!randomWholeParty && (
+            <select className="input" value={randomCharId} onChange={(e) => setRandomCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          {randomWholeParty && (
+            <p className="text-xs text-stone-500">Each party member receives random loot.</p>
+          )}
+          {!randomWholeParty && selectedRandomMember && (
+            <p className="text-xs text-stone-500">Only {selectedRandomMember.name} receives random loot.</p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label">Tier</label>
+              <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Count each</label>
+              <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {rewardType === 'hp' && (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={hpWholeParty} onChange={(e) => setHpWholeParty(e.target.checked)} />
+            Whole party
+          </label>
+          {!hpWholeParty && (
+            <>
+              <select className="input" value={charId} onChange={(e) => setCharId(+e.target.value)}>
+                {party.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.current_hp != null && p.max_hp != null ? ` (HP ${p.current_hp}/${p.max_hp})` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedMember?.current_hp != null && selectedMember.max_hp != null && (
+                <p className="text-sm text-dungeon-300">
+                  {selectedMember.name}: HP {selectedMember.current_hp} / {selectedMember.max_hp}
+                </p>
+              )}
+            </>
+          )}
+          {hpWholeParty && (
+            <div className="space-y-1 text-sm text-dungeon-300">
+              {party.map((p) => (
+                <p key={p.id}>
+                  {p.name}
+                  {p.current_hp != null && p.max_hp != null ? `: HP ${p.current_hp}/${p.max_hp}` : ''}
+                </p>
+              ))}
+            </div>
+          )}
+          <div>
+            <label className="label">HP change</label>
+            <input
+              className="input"
+              type="number"
+              value={hpChange}
+              onChange={(e) => setHpChange(+e.target.value)}
+              placeholder="e.g. -5 damage, +5 heal"
+            />
+            <p className="mt-1 text-xs text-stone-500">
+              Negative reduces current HP; positive heals (capped at max). Does not change max HP.
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
