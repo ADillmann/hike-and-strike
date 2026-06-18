@@ -23,6 +23,7 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
                 <Link className="hover:text-dungeon-300" to="/organizer/groups">Groups</Link>
                 <Link className="hover:text-dungeon-300" to="/organizer/events">Events</Link>
                 <Link className="hover:text-dungeon-300" to="/organizer/items">Items</Link>
+                <Link className="hover:text-dungeon-300" to="/organizer/enemies">Enemies</Link>
                 <Link className="hover:text-dungeon-300" to="/organizer/campaigns">Campaigns</Link>
               </>
             ) : (

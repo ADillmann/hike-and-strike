@@ -9,7 +9,9 @@ from app.auth import require_master
 from app.config import settings
 from app.database import get_db
 from app.models import EventTemplate, User
-from app.schemas import EventTemplateCreate, EventTemplateOut
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.schemas import EventTemplateCreate, EventTemplateOut, EventTemplateUpdate
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -38,14 +40,16 @@ def create_event(
 @router.patch("/{event_id}", response_model=EventTemplateOut)
 def update_event(
     event_id: int,
-    payload: EventTemplateCreate,
+    payload: EventTemplateUpdate,
     master: Annotated[User, Depends(require_master)],
     db: Annotated[Session, Depends(get_db)],
 ) -> EventTemplateOut:
     event = db.get(EventTemplate, event_id)
-    if not event or (event.master_id and event.master_id != master.id and not event.is_generic):
+    if not event or event.is_generic:
+        raise HTTPException(status_code=400, detail="Cannot edit generic/system event")
+    if event.master_id != master.id:
         raise HTTPException(status_code=404, detail="Event not found")
-    for k, v in payload.model_dump().items():
+    for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(event, k, v)
     db.commit()
     db.refresh(event)
@@ -85,6 +89,7 @@ async def upload_event_image(
     images = list(event.images or [])
     images.append(f"/uploads/{filename}")
     event.images = images
+    flag_modified(event, "images")
     db.commit()
     db.refresh(event)
     return event

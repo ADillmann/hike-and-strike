@@ -124,6 +124,12 @@ class EventTemplateCreate(BaseModel):
     branch_hints: dict | None = None
 
 
+class EventTemplateUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    event_type: str | None = None
+
+
 class EventTemplateOut(BaseModel):
     id: int
     name: str
@@ -187,6 +193,8 @@ class AdvanceCampaignRequest(BaseModel):
     outcome: str
     master_notes: str | None = None
     apply_rest: bool = False
+    rewards: dict[str, Any] | None = None
+    punishments: dict[str, Any] | None = None
 
 
 class RewardsRequest(BaseModel):
@@ -197,3 +205,54 @@ class RewardsRequest(BaseModel):
 class EquipRequest(BaseModel):
     inventory_item_id: int
     slot: str | None = None
+
+
+class GiveItemRequest(BaseModel):
+    inventory_item_id: int
+    target_character_id: int
+    quantity: int = 1
+
+
+class UseItemRequest(BaseModel):
+    inventory_item_id: int
+
+
+class DiscardItemRequest(BaseModel):
+    inventory_item_id: int
+
+
+class EnemyTemplateCreate(BaseModel):
+    name: str
+    stats: dict[str, Any] = Field(default_factory=dict)
+    description: str = ""
+
+
+class EnemyTemplateOut(BaseModel):
+    id: int
+    name: str
+    stats: dict[str, Any]
+    description: str
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
+class EnemySpec(BaseModel):
+    template_id: int
+    count: int = 1
+    power_scale: float = 1.0
+
+
+class BattleCreateRequest(BaseModel):
+    enemies: list[EnemySpec] = Field(default_factory=list)
+    preset: str | None = None
+    group_initiative_bonus: float = 0.0
+    enemy_initiative_bonus: float = 0.0
+
+
+class BattleActionRequest(BaseModel):
+    action: str
+    actor_id: str | None = None
+    target_id: str | None = None
+    skill_id: int | None = None

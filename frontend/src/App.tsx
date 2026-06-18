@@ -12,6 +12,8 @@ import CharacterCreatePage, { CharacterSheetPage } from './pages/player/Characte
 import InventoryPage from './pages/player/Inventory';
 import SkillsPage from './pages/player/Skills';
 import CampaignPage from './pages/player/Campaign';
+import BattlePage from './pages/Battle';
+import EnemiesPage from './pages/master/Enemies';
 
 function Protected({ children, role }: { children: React.ReactNode; role?: 'master' | 'player' }) {
   const { user, loading } = useAuth();
@@ -30,6 +32,7 @@ export default function App() {
       <Route path="/organizer/groups" element={<Protected role="master"><GroupsPage /></Protected>} />
       <Route path="/organizer/events" element={<Protected role="master"><EventsPage /></Protected>} />
       <Route path="/organizer/items" element={<Protected role="master"><ItemsPage /></Protected>} />
+      <Route path="/organizer/enemies" element={<Protected role="master"><EnemiesPage /></Protected>} />
       <Route path="/organizer/campaigns" element={<Protected role="master"><CampaignsPage /></Protected>} />
       <Route path="/organizer/campaigns/:id/control" element={<Protected role="master"><CampaignControlPage /></Protected>} />
       <Route path="/character/create" element={<Protected role="player"><CharacterCreatePage /></Protected>} />
@@ -37,7 +40,7 @@ export default function App() {
       <Route path="/inventory" element={<Protected role="player"><InventoryPage /></Protected>} />
       <Route path="/skills" element={<Protected role="player"><SkillsPage /></Protected>} />
       <Route path="/campaign" element={<Protected role="player"><CampaignPage /></Protected>} />
-      <Route path="/battle" element={<Protected><div className="flex min-h-screen items-center justify-center"><p className="text-dungeon-300">Battle system — Phase 2</p></div></Protected>} />
+      <Route path="/battle/:id" element={<Protected><BattlePage /></Protected>} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

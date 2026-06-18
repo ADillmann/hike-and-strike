@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Layout, StatEditor } from '../../components/Layout';
 import type { Character, UserInfo } from '../../api/client';
+
+interface StatLog {
+  id: number;
+  stat_name: string;
+  old_value: number;
+  new_value: number;
+  reason: string | null;
+  timestamp: string;
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
@@ -12,6 +22,11 @@ export default function UsersPage() {
   const [editStats, setEditStats] = useState<Record<string, number>>({});
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [resetUserId, setResetUserId] = useState<number | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
+  const [historyCharId, setHistoryCharId] = useState<number | null>(null);
+  const [statHistory, setStatHistory] = useState<StatLog[]>([]);
 
   const load = () => {
     api.get<UserInfo[]>('/users').then(setUsers);
@@ -52,6 +67,26 @@ export default function UsersPage() {
     setSelectedChar(null);
   };
 
+  const doResetPassword = async () => {
+    if (!resetUserId || !resetPassword) return;
+    await api.patch(`/users/${resetUserId}`, { password: resetPassword });
+    setResetUserId(null);
+    setResetPassword('');
+  };
+
+  const doDeleteUser = async () => {
+    if (!deleteUserId) return;
+    await api.delete(`/users/${deleteUserId}`);
+    setDeleteUserId(null);
+    load();
+  };
+
+  const openHistory = async (charId: number) => {
+    setHistoryCharId(charId);
+    const logs = await api.get<StatLog[]>(`/characters/${charId}/stat-history`);
+    setStatHistory(logs);
+  };
+
   return (
     <Layout title="Users & Characters">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -63,9 +98,15 @@ export default function UsersPage() {
             <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             <button className="btn-primary" type="submit">Create User</button>
           </form>
-          <ul className="mt-4 space-y-1 text-sm">
+          <ul className="mt-4 space-y-2 text-sm">
             {users.map((u) => (
-              <li key={u.id} className="text-stone-400">{u.username} {u.has_character ? '✓ character' : '(no character)'}</li>
+              <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-dungeon-700 p-2">
+                <span className="text-stone-400">{u.username} {u.has_character ? '✓ character' : '(no character)'}</span>
+                <div className="flex gap-1">
+                  <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => setResetUserId(u.id)}>Reset PW</button>
+                  <button className="btn-danger px-2 py-0.5 text-xs" onClick={() => setDeleteUserId(u.id)}>Delete</button>
+                </div>
+              </li>
             ))}
           </ul>
         </section>
@@ -74,9 +115,12 @@ export default function UsersPage() {
           <h2 className="mb-3 font-semibold text-dungeon-300">Edit Character Stats</h2>
           <div className="space-y-2">
             {characters.map((c) => (
-              <button key={c.id} className="w-full rounded border border-dungeon-600 p-2 text-left hover:bg-dungeon-700" onClick={() => openEditor(c)}>
-                {c.name} ({c.username}) — HP {c.current_hp}/{c.max_hp}
-              </button>
+              <div key={c.id} className="flex gap-2">
+                <button className="flex-1 rounded border border-dungeon-600 p-2 text-left hover:bg-dungeon-700" onClick={() => openEditor(c)}>
+                  {c.name} ({c.username}) — HP {c.current_hp}/{c.max_hp}
+                </button>
+                <button className="btn-secondary px-2 text-xs" onClick={() => openHistory(c.id)}>History</button>
+              </div>
             ))}
           </div>
           {selectedChar && (
@@ -102,6 +146,45 @@ export default function UsersPage() {
           )}
         </section>
       </div>
+
+      {resetUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card max-w-sm w-full space-y-3">
+            <h3 className="font-semibold">Reset Password</h3>
+            <input className="input" type="password" placeholder="New password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} />
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={doResetPassword}>Save</button>
+              <button className="btn-secondary" onClick={() => setResetUserId(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteUserId && (
+        <ConfirmDialog
+          title="Delete User"
+          message="This will permanently delete the user and their character. Continue?"
+          onConfirm={doDeleteUser}
+          onCancel={() => setDeleteUserId(null)}
+        />
+      )}
+
+      {historyCharId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card max-w-md w-full max-h-[60vh] overflow-y-auto">
+            <h3 className="mb-3 font-semibold">Stat Change History</h3>
+            {statHistory.length === 0 && <p className="text-stone-500 text-sm">No changes recorded.</p>}
+            {statHistory.map((log) => (
+              <div key={log.id} className="mb-2 border-b border-dungeon-700 pb-2 text-sm">
+                <span className="text-dungeon-400">{log.stat_name}</span>: {log.old_value} → {log.new_value}
+                {log.reason && <span className="text-stone-500"> ({log.reason})</span>}
+                <div className="text-xs text-stone-600">{new Date(log.timestamp).toLocaleString()}</div>
+              </div>
+            ))}
+            <button className="btn-secondary mt-2" onClick={() => setHistoryCharId(null)}>Close</button>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

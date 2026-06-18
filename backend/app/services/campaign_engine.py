@@ -15,7 +15,7 @@ from app.models import (
     Skill,
     TemporaryEffect,
 )
-from app.services.character_stats import armor_bonus_from_inventory, compute_max_hp
+from app.services.character_stats import armor_bonus_from_inventory, compute_max_hp, stacks_in_inventory
 from app.websocket.manager import ws_manager
 
 
@@ -99,18 +99,20 @@ async def broadcast_character_updated(db: Session, character_id: int, campaign_i
 
 
 def grant_item(db: Session, character_id: int, item_template_id: int, equipped_slot: str | None = None) -> InventoryItem:
-    existing = (
-        db.query(InventoryItem)
-        .filter(
-            InventoryItem.character_id == character_id,
-            InventoryItem.item_template_id == item_template_id,
-            InventoryItem.equipped_slot.is_(None),
+    template = db.get(ItemTemplate, item_template_id)
+    if template and stacks_in_inventory(template) and not equipped_slot:
+        existing = (
+            db.query(InventoryItem)
+            .filter(
+                InventoryItem.character_id == character_id,
+                InventoryItem.item_template_id == item_template_id,
+                InventoryItem.equipped_slot.is_(None),
+            )
+            .first()
         )
-        .first()
-    )
-    if existing and not equipped_slot:
-        existing.quantity += 1
-        return existing
+        if existing:
+            existing.quantity += 1
+            return existing
     item = InventoryItem(
         character_id=character_id,
         item_template_id=item_template_id,

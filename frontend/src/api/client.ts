@@ -66,10 +66,13 @@ export interface Character {
     name: string;
     item_type: string;
     tier: number;
-    stats: Record<string, number>;
+    description: string;
+    stats: Record<string, number | boolean>;
     equipped_slot: string | null;
     quantity: number;
     item_template_id: number;
+    equippable: boolean;
+    bag_only: boolean;
   }[];
   temporary_effects: { id: number; label: string; stat_modifiers: Record<string, number> }[];
 }

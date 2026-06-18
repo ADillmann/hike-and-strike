@@ -11,15 +11,24 @@ from app.database import get_db
 from app.game.constants import EQUIP_SLOTS, STARTER_SKILLS, STAT_NAMES
 from app.models import (
     Character,
+    GroupMember,
     InventoryItem,
     Skill,
     StatChangeLog,
     User,
     UserRole,
 )
-from app.schemas import CharacterCreate, CharacterOut, EquipRequest, StatChangeOut, StatEditRequest
+from app.schemas import CharacterCreate, CharacterOut, EquipRequest, GiveItemRequest, StatChangeOut, StatEditRequest, UseItemRequest, DiscardItemRequest
 from app.services.campaign_engine import broadcast_character_updated, recalculate_character_hp
-from app.services.character_stats import effective_stats, validate_point_buy, weapon_attack_bonus
+from app.services.character_stats import (
+    effective_stats,
+    equip_slot_for_item,
+    is_bag_only_item,
+    is_equippable,
+    stacks_in_inventory,
+    validate_point_buy,
+    weapon_attack_bonus,
+)
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -61,9 +70,12 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
                 "name": i.item_template.name if i.item_template else None,
                 "item_type": i.item_template.item_type if i.item_template else None,
                 "tier": i.item_template.tier if i.item_template else None,
+                "description": i.item_template.description if i.item_template else "",
                 "stats": i.item_template.stats if i.item_template else {},
                 "equipped_slot": i.equipped_slot,
                 "quantity": i.quantity,
+                "equippable": is_equippable(i.item_template) if i.item_template else False,
+                "bag_only": is_bag_only_item(i.item_template) if i.item_template else True,
             }
             for i in character.inventory_items
         ],
@@ -247,6 +259,12 @@ def equip_item(
     if not inv or inv.character_id != character.id:
         raise HTTPException(status_code=404, detail="Item not found")
     slot = payload.slot
+    if slot:
+        if not inv.item_template or not is_equippable(inv.item_template):
+            raise HTTPException(status_code=400, detail="This item cannot be equipped")
+        allowed = equip_slot_for_item(inv.item_template)
+        if slot != allowed:
+            raise HTTPException(status_code=400, detail=f"This item must be equipped as {allowed}")
     if slot and slot not in EQUIP_SLOTS:
         raise HTTPException(status_code=400, detail="Invalid slot")
     if slot:
@@ -259,5 +277,169 @@ def equip_item(
             existing.equipped_slot = None
     inv.equipped_slot = slot
     recalculate_character_hp(db, character)
+    db.commit()
+    return _serialize_character(db, character)
+
+
+def _share_group(db: Session, character_id_a: int, character_id_b: int) -> bool:
+    groups_a = {m.group_id for m in db.query(GroupMember).filter(GroupMember.character_id == character_id_a).all()}
+    if not groups_a:
+        return False
+    return (
+        db.query(GroupMember)
+        .filter(GroupMember.character_id == character_id_b, GroupMember.group_id.in_(groups_a))
+        .first()
+        is not None
+    )
+
+
+@router.get("/me/party")
+def get_party_members(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+    group_ids = [m.group_id for m in db.query(GroupMember).filter(GroupMember.character_id == character.id).all()]
+    if not group_ids:
+        return []
+    members = (
+        db.query(GroupMember)
+        .filter(GroupMember.group_id.in_(group_ids), GroupMember.character_id != character.id)
+        .all()
+    )
+    seen: set[int] = set()
+    result = []
+    for m in members:
+        if m.character_id in seen:
+            continue
+        seen.add(m.character_id)
+        c = db.get(Character, m.character_id)
+        if c:
+            result.append({"character_id": c.id, "name": c.name})
+    return result
+
+
+@router.post("/me/give-item", response_model=CharacterOut)
+async def give_item_to_party_member(
+    payload: GiveItemRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+    if payload.target_character_id == character.id:
+        raise HTTPException(status_code=400, detail="Cannot give items to yourself")
+
+    inv = db.get(InventoryItem, payload.inventory_item_id)
+    if not inv or inv.character_id != character.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if inv.equipped_slot:
+        raise HTTPException(status_code=400, detail="Unequip the item before giving it away")
+
+    target = db.get(Character, payload.target_character_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    if not _share_group(db, character.id, target.id):
+        raise HTTPException(status_code=400, detail="You can only give items to members of your group")
+
+    qty = max(1, min(payload.quantity, inv.quantity))
+    template = inv.item_template
+
+    if template and stacks_in_inventory(template):
+        inv.quantity -= qty
+        if inv.quantity <= 0:
+            db.delete(inv)
+        existing_target = (
+            db.query(InventoryItem)
+            .filter(
+                InventoryItem.character_id == target.id,
+                InventoryItem.item_template_id == inv.item_template_id,
+                InventoryItem.equipped_slot.is_(None),
+            )
+            .first()
+        )
+        if existing_target:
+            existing_target.quantity += qty
+        else:
+            db.add(
+                InventoryItem(
+                    character_id=target.id,
+                    item_template_id=inv.item_template_id,
+                    quantity=qty,
+                )
+            )
+    else:
+        if qty != inv.quantity:
+            raise HTTPException(status_code=400, detail="This item must be given in full")
+        inv.character_id = target.id
+
+    db.commit()
+    await broadcast_character_updated(db, target.id)
+    return _serialize_character(db, character)
+
+
+@router.post("/me/use-item", response_model=CharacterOut)
+async def use_item(
+    payload: UseItemRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+
+    inv = db.get(InventoryItem, payload.inventory_item_id)
+    if not inv or inv.character_id != character.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if inv.equipped_slot:
+        raise HTTPException(status_code=400, detail="Cannot use equipped items")
+    template = inv.item_template
+    if not template or template.item_type != "consumable":
+        raise HTTPException(status_code=400, detail="This item cannot be used")
+
+    stats = template.stats or {}
+    heal = stats.get("heal", 0)
+    if isinstance(heal, int) and heal > 0:
+        character.current_hp = min(character.max_hp, character.current_hp + heal)
+
+    if inv.quantity > 1:
+        inv.quantity -= 1
+    else:
+        db.delete(inv)
+
+    db.commit()
+    return _serialize_character(db, character)
+
+
+@router.post("/me/discard-item", response_model=CharacterOut)
+def discard_item(
+    payload: DiscardItemRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+
+    inv = db.get(InventoryItem, payload.inventory_item_id)
+    if not inv or inv.character_id != character.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    was_equipped = bool(inv.equipped_slot)
+    db.delete(inv)
+    if was_equipped:
+        recalculate_character_hp(db, character)
+
     db.commit()
     return _serialize_character(db, character)

@@ -11,7 +11,9 @@ from app.services.campaign_engine import (
     apply_rest_to_party,
     apply_rewards_and_punishments,
     broadcast_campaign_state,
+    broadcast_character_updated,
     campaign_state_payload,
+    get_campaign_party,
 )
 from app.websocket.manager import ws_manager
 
@@ -45,21 +47,38 @@ async def advance_campaign(
         raise HTTPException(status_code=404, detail="Node not found")
 
     prev_node_id = campaign.current_node_id
+
+    target_template = db.get(EventTemplate, node.event_template_id)
+    apply_rest = payload.apply_rest
+    if target_template and target_template.event_type in ("rest", "generic"):
+        apply_rest = True
+
+    if payload.rewards or payload.punishments:
+        apply_rewards_and_punishments(
+            db, campaign, payload.rewards, payload.punishments, master.id
+        )
+
     history = EventHistory(
         campaign_id=campaign_id,
         node_id=prev_node_id,
         outcome=payload.outcome,
         master_notes=payload.master_notes,
+        rewards_json=payload.rewards,
+        punishments_json=payload.punishments,
     )
     db.add(history)
 
-    if payload.apply_rest:
+    if apply_rest:
         apply_rest_to_party(db, campaign)
 
     campaign.current_node_id = payload.node_id
     if campaign.status == "draft":
         campaign.status = "active"
     db.commit()
+
+    if payload.rewards or payload.punishments:
+        for character in get_campaign_party(db, campaign):
+            await broadcast_character_updated(db, character.id, campaign_id)
 
     await ws_manager.broadcast(
         campaign_id,
@@ -95,6 +114,8 @@ async def apply_rewards(
         raise HTTPException(status_code=404, detail="Campaign not found")
     apply_rewards_and_punishments(db, campaign, payload.rewards, payload.punishments, master.id)
     db.commit()
+    for character in get_campaign_party(db, campaign):
+        await broadcast_character_updated(db, character.id, campaign_id)
     await broadcast_campaign_state(db, campaign_id)
     return {"ok": True}
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
 import { Layout, StatEditor } from '../../components/Layout';
+import { RewardsPanel, RewardsPayload } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 
 interface CampaignState {
@@ -17,10 +18,19 @@ interface CampaignState {
 
 interface Node { id: number; sort_order: number; event_name: string; event_type: string }
 interface Item { id: number; name: string; tier: number }
-interface HistoryEntry { id: number; event_name: string; outcome: string; master_notes: string; timestamp: string }
+interface HistoryEntry {
+  id: number;
+  event_name: string;
+  outcome: string;
+  master_notes: string;
+  rewards_json: Record<string, unknown> | null;
+  punishments_json: Record<string, unknown> | null;
+  timestamp: string;
+}
 
 export default function CampaignControlPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const campaignId = Number(id);
   const [state, setState] = useState<CampaignState | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -30,8 +40,9 @@ export default function CampaignControlPage() {
   const [outcome, setOutcome] = useState('success');
   const [notes, setNotes] = useState('');
   const [applyRest, setApplyRest] = useState(false);
-  const [rewardItemId, setRewardItemId] = useState(0);
-  const [rewardCharId, setRewardCharId] = useState(0);
+  const [advanceRewards, setAdvanceRewards] = useState<RewardsPayload>({});
+  const [showBattleSetup, setShowBattleSetup] = useState(false);
+  const [activeBattleId, setActiveBattleId] = useState<number | null>(null);
   const [editChar, setEditChar] = useState<Character | null>(null);
   const [editStats, setEditStats] = useState<Record<string, number>>({});
 
@@ -46,7 +57,10 @@ export default function CampaignControlPage() {
       }
     });
     api.get<HistoryEntry[]>(`/campaigns/${campaignId}/history`).then(setHistory);
-    api.get<Item[]>('/items').then((its) => { setItems(its); if (its[0]) setRewardItemId(its[0].id); });
+    api.get<Item[]>('/items').then(setItems);
+    api.get<{ active: boolean; battle_id?: number }>(`/battles/campaigns/${campaignId}/active`).then((b) => {
+      if (b.active && b.battle_id) setActiveBattleId(b.battle_id);
+    });
   }, [campaignId, nextNodeId]);
 
   useEffect(() => { load(); }, [load]);
@@ -54,34 +68,46 @@ export default function CampaignControlPage() {
   useCampaignSocket(campaignId, (msg) => {
     if (msg.type === 'campaign_state') setState(msg.data as CampaignState);
     if (msg.type === 'history_added' || msg.type === 'character_updated') load();
+    if (msg.type === 'battle_started' && msg.data && typeof msg.data === 'object') {
+      const d = msg.data as { battle_id: number };
+      setActiveBattleId(d.battle_id);
+    }
   });
 
   useEffect(() => {
-    if (state?.party[0]) setRewardCharId(state.party[0].id);
-  }, [state]);
+    const target = nodes.find((n) => n.id === nextNodeId);
+    if (target && (target.event_type === 'rest' || target.event_type === 'generic')) {
+      setApplyRest(true);
+    }
+  }, [nextNodeId, nodes]);
 
   const advance = async () => {
-    await api.post(`/campaigns/${campaignId}/advance`, {
+    const payload: Record<string, unknown> = {
       node_id: nextNodeId || state?.current_node?.node_id,
       outcome,
       master_notes: notes,
       apply_rest: applyRest,
-    });
+    };
+    if (advanceRewards.rewards) payload.rewards = advanceRewards.rewards;
+    if (advanceRewards.punishments) payload.punishments = advanceRewards.punishments;
+    await api.post(`/campaigns/${campaignId}/advance`, payload);
     setNotes('');
+    setAdvanceRewards({});
     load();
   };
 
-  const grantItem = async () => {
-    await api.post(`/campaigns/${campaignId}/rewards`, {
-      rewards: { items: [{ character_id: rewardCharId, item_template_id: rewardItemId }] },
-    });
+  const pauseCampaign = async () => {
+    await api.post(`/campaigns/${campaignId}/pause`);
     load();
   };
 
-  const punishHalfHp = async (charId: number) => {
-    await api.post(`/campaigns/${campaignId}/rewards`, {
-      punishments: { hp_reduction: [{ character_id: charId, half: true }] },
-    });
+  const completeCampaign = async () => {
+    await api.post(`/campaigns/${campaignId}/complete`);
+    navigate('/organizer/campaigns');
+  };
+
+  const resumeCampaign = async () => {
+    await api.post(`/campaigns/${campaignId}/start`);
     load();
   };
 
@@ -105,8 +131,23 @@ export default function CampaignControlPage() {
 
   if (!state) return <Layout title="Campaign Control">Loading...</Layout>;
 
+  const targetNode = nodes.find((n) => n.id === nextNodeId);
+
   return (
     <Layout title={`Campaign: ${state.name}`}>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <span className="rounded bg-dungeon-700 px-2 py-1 text-sm capitalize">{state.status}</span>
+        {state.status === 'active' && (
+          <>
+            <button className="btn-secondary text-sm" onClick={pauseCampaign}>Pause</button>
+            <button className="btn-danger text-sm" onClick={completeCampaign}>Complete</button>
+          </>
+        )}
+        {state.status === 'paused' && (
+          <button className="btn-primary text-sm" onClick={resumeCampaign}>Resume</button>
+        )}
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="card lg:col-span-2">
           <h2 className="mb-2 text-lg font-semibold text-dungeon-300">
@@ -114,8 +155,24 @@ export default function CampaignControlPage() {
           </h2>
           <p className="mb-2 text-xs text-stone-500">{state.current_node?.event.event_type}</p>
           <p className="whitespace-pre-wrap text-stone-300">{state.current_node?.event.description}</p>
+          {state.current_node?.event.images && state.current_node.event.images.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {state.current_node.event.images.map((img, i) => (
+                <img key={i} src={img} alt="" className="max-h-48 rounded border border-dungeon-600 object-cover" />
+              ))}
+            </div>
+          )}
           {state.current_node?.event.event_type === 'battle_hook' && (
-            <p className="mt-3 rounded border border-dungeon-500 p-2 text-dungeon-300">Battle system — Phase 2</p>
+            <div className="mt-3 rounded border border-dungeon-500 p-3">
+              <p className="text-dungeon-300 mb-2">Battle encounter</p>
+              {activeBattleId ? (
+                <button className="btn-primary text-sm" onClick={() => navigate(`/battle/${activeBattleId}`)}>
+                  Open Battle #{activeBattleId}
+                </button>
+              ) : (
+                <button className="btn-primary text-sm" onClick={() => setShowBattleSetup(true)}>Start Battle</button>
+              )}
+            </div>
           )}
         </section>
 
@@ -127,13 +184,19 @@ export default function CampaignControlPage() {
                 <span className="font-medium">{p.name}</span>
                 <span>HP {p.current_hp}/{p.max_hp}</span>
               </div>
-              <div className="mt-1 flex flex-wrap gap-1">
+              <div className="mt-1">
                 <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => openStatEdit(p.id)}>Edit Stats</button>
-                <button className="btn-danger px-2 py-0.5 text-xs" onClick={() => punishHalfHp(p.id)}>Half HP</button>
               </div>
             </div>
           ))}
         </section>
+
+        <RewardsPanel
+          campaignId={campaignId}
+          party={state.party}
+          items={items}
+          onApplied={load}
+        />
 
         <section className="card lg:col-span-2">
           <h2 className="mb-2 font-semibold text-dungeon-300">Advance Event</h2>
@@ -147,23 +210,22 @@ export default function CampaignControlPage() {
               <option value="partial">Partial</option>
             </select>
           </div>
+          {targetNode && (targetNode.event_type === 'rest' || targetNode.event_type === 'generic') && (
+            <p className="mt-1 text-xs text-dungeon-400">Rest will auto-apply when advancing to this event.</p>
+          )}
           <textarea className="input mt-2 min-h-16" placeholder="Master notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
           <label className="mt-2 flex items-center gap-2 text-sm">
             <input type="checkbox" checked={applyRest} onChange={(e) => setApplyRest(e.target.checked)} />
             Apply rest (refill skills, clear rest debuffs)
           </label>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-sm text-dungeon-400">Attach rewards/punishments to this advance</summary>
+            <div className="mt-2 space-y-2 rounded border border-dungeon-600 p-2 text-sm">
+              <p className="text-xs text-stone-500">These will be logged in event history when you advance.</p>
+              <AdvanceRewardBuilder party={state.party} items={items} onChange={setAdvanceRewards} />
+            </div>
+          </details>
           <button className="btn-primary mt-2" onClick={advance}>Go to Next Event</button>
-        </section>
-
-        <section className="card">
-          <h2 className="mb-2 font-semibold text-dungeon-300">Quick Reward</h2>
-          <select className="input mb-2" value={rewardCharId} onChange={(e) => setRewardCharId(+e.target.value)}>
-            {state.party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select className="input mb-2" value={rewardItemId} onChange={(e) => setRewardItemId(+e.target.value)}>
-            {items.map((i) => <option key={i.id} value={i.id}>{i.name} (T{i.tier})</option>)}
-          </select>
-          <button className="btn-secondary w-full" onClick={grantItem}>Grant Item</button>
         </section>
 
         <section className="card lg:col-span-3">
@@ -173,6 +235,8 @@ export default function CampaignControlPage() {
               <div key={h.id} className="border-b border-dungeon-700 py-1">
                 <span className="text-dungeon-400">{h.event_name}</span> — {h.outcome}
                 {h.master_notes && <span className="text-stone-500"> — {h.master_notes}</span>}
+                {h.rewards_json && <span className="ml-2 text-xs text-green-400">[+rewards]</span>}
+                {h.punishments_json && <span className="ml-2 text-xs text-red-400">[-punishments]</span>}
               </div>
             ))}
           </div>
@@ -191,6 +255,153 @@ export default function CampaignControlPage() {
           </div>
         </div>
       )}
+
+      {showBattleSetup && (
+        <BattleSetupModal
+          campaignId={campaignId}
+          onClose={() => setShowBattleSetup(false)}
+          onCreated={(battleId) => {
+            setShowBattleSetup(false);
+            setActiveBattleId(battleId);
+            navigate(`/battle/${battleId}`);
+          }}
+        />
+      )}
     </Layout>
+  );
+}
+
+interface EnemyOption { id: number; name: string }
+interface Preset { id: string; name: string }
+
+function BattleSetupModal({
+  campaignId,
+  onClose,
+  onCreated,
+}: {
+  campaignId: number;
+  onClose: () => void;
+  onCreated: (battleId: number) => void;
+}) {
+  const [enemies, setEnemies] = useState<EnemyOption[]>([]);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [mode, setMode] = useState<'preset' | 'custom'>('preset');
+  const [preset, setPreset] = useState('goblin_crowd');
+  const [enemyId, setEnemyId] = useState(0);
+  const [count, setCount] = useState(1);
+  const [powerScale, setPowerScale] = useState(1);
+  const [groupBonus, setGroupBonus] = useState(0);
+  const [enemyBonus, setEnemyBonus] = useState(0);
+
+  useEffect(() => {
+    api.get<EnemyOption[]>('/enemies').then((e) => { setEnemies(e); if (e[0]) setEnemyId(e[0].id); });
+    api.get<Preset[]>('/enemies/presets').then(setPresets);
+  }, []);
+
+  const create = async () => {
+    const payload = mode === 'preset'
+      ? { preset, group_initiative_bonus: groupBonus, enemy_initiative_bonus: enemyBonus }
+      : {
+          enemies: [{ template_id: enemyId, count, power_scale: powerScale }],
+          group_initiative_bonus: groupBonus,
+          enemy_initiative_bonus: enemyBonus,
+        };
+    const res = await api.post<{ id: number }>(`/battles/campaigns/${campaignId}`, payload);
+    onCreated(res.id);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="card max-w-md w-full space-y-3">
+        <h3 className="font-semibold text-dungeon-300">Setup Battle</h3>
+        <div className="flex gap-2">
+          <button className={`text-sm px-2 py-1 rounded ${mode === 'preset' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('preset')}>Preset</button>
+          <button className={`text-sm px-2 py-1 rounded ${mode === 'custom' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('custom')}>Custom</button>
+        </div>
+        {mode === 'preset' ? (
+          <select className="input" value={preset} onChange={(e) => setPreset(e.target.value)}>
+            {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        ) : (
+          <>
+            <select className="input" value={enemyId} onChange={(e) => setEnemyId(+e.target.value)}>
+              {enemies.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="label">Count</label>
+                <input className="input" type="number" min={1} max={10} value={count} onChange={(e) => setCount(+e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Power scale</label>
+                <input className="input" type="number" min={0.5} max={3} step={0.1} value={powerScale} onChange={(e) => setPowerScale(+e.target.value)} />
+              </div>
+            </div>
+          </>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="label">Group init. bonus</label>
+            <input className="input" type="number" step={0.1} value={groupBonus} onChange={(e) => setGroupBonus(+e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Enemy init. bonus</label>
+            <input className="input" type="number" step={0.1} value={enemyBonus} onChange={(e) => setEnemyBonus(+e.target.value)} />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={create}>Create Battle</button>
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdvanceRewardBuilder({
+  party,
+  items,
+  onChange,
+}: {
+  party: { id: number; name: string }[];
+  items: Item[];
+  onChange: (payload: RewardsPayload) => void;
+}) {
+  const [rewardType, setRewardType] = useState<'item' | 'random' | 'halfhp'>('item');
+  const [charId, setCharId] = useState(party[0]?.id || 0);
+  const [itemId, setItemId] = useState(items[0]?.id || 0);
+  const [tier, setTier] = useState(1);
+
+  useEffect(() => {
+    if (rewardType === 'item' && charId && itemId) {
+      onChange({ rewards: { items: [{ character_id: charId, item_template_id: itemId }] } });
+    } else if (rewardType === 'random') {
+      onChange({ rewards: { random_tier: [{ tier, count: 1, character_ids: party.map((p) => p.id) }] } });
+    } else if (rewardType === 'halfhp') {
+      onChange({ punishments: { hp_reduction: [{ character_id: charId, half: true }] } });
+    }
+  }, [rewardType, charId, itemId, tier, party, onChange]);
+
+  return (
+    <div className="space-y-2">
+      <select className="input" value={rewardType} onChange={(e) => setRewardType(e.target.value as typeof rewardType)}>
+        <option value="item">Grant item</option>
+        <option value="random">Random tier loot</option>
+        <option value="halfhp">Half HP punishment</option>
+      </select>
+      {(rewardType === 'item' || rewardType === 'halfhp') && (
+        <select className="input" value={charId} onChange={(e) => setCharId(+e.target.value)}>
+          {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      )}
+      {rewardType === 'item' && (
+        <select className="input" value={itemId} onChange={(e) => setItemId(+e.target.value)}>
+          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+        </select>
+      )}
+      {rewardType === 'random' && (
+        <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+      )}
+    </div>
   );
 }

@@ -9,9 +9,11 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import (
     auth,
+    battles,
     campaign_runtime,
     campaigns,
     characters,
+    enemies,
     events,
     groups,
     items,
@@ -55,6 +57,8 @@ api.include_router(items.router)
 api.include_router(campaigns.router)
 api.include_router(campaign_runtime.router)
 api.include_router(player_campaign.router)
+api.include_router(enemies.router)
+api.include_router(battles.router)
 
 app.mount("/api", api)
 app.include_router(websocket.router)
