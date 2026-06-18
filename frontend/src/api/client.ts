@@ -73,6 +73,7 @@ export interface Character {
     item_template_id: number;
     equippable: boolean;
     bag_only: boolean;
+    equip_slots: string[];
   }[];
   temporary_effects: { id: number; label: string; stat_modifiers: Record<string, number> }[];
 }

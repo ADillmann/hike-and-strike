@@ -1,4 +1,16 @@
-from app.game.constants import HP_BASE, HP_PER_DURABILITY, POINT_BUY_POOL, STAT_DEFAULT, STAT_MAX, STAT_MIN, STAT_NAMES
+from app.game.constants import (
+    ARMOR_ITEM_TYPES,
+    EQUIP_SLOTS,
+    HAND_SLOTS,
+    HP_BASE,
+    HP_PER_DURABILITY,
+    LEGACY_EQUIP_SLOTS,
+    POINT_BUY_POOL,
+    STAT_DEFAULT,
+    STAT_MAX,
+    STAT_MIN,
+    STAT_NAMES,
+)
 
 
 def point_cost(value: int) -> int:
@@ -20,10 +32,49 @@ def validate_point_buy(stats: dict[str, int]) -> None:
         raise ValueError(f"Point buy exceeds pool of {POINT_BUY_POOL}")
 
 
+def normalize_equipped_slot(slot: str | None) -> str | None:
+    if not slot:
+        return None
+    return LEGACY_EQUIP_SLOTS.get(slot, slot)
+
+
+def is_two_handed_weapon(inventory_item) -> bool:
+    if not inventory_item or not inventory_item.item_template:
+        return False
+    if inventory_item.item_template.item_type != "weapon":
+        return False
+    return bool((inventory_item.item_template.stats or {}).get("two_handed"))
+
+
+def hand_is_occupied(inventory_items, hand: str, except_id: int | None = None) -> bool:
+    hand = normalize_equipped_slot(hand)
+    for inv in inventory_items:
+        if except_id and inv.id == except_id:
+            continue
+        if not inv.equipped_slot:
+            continue
+        slot = normalize_equipped_slot(inv.equipped_slot)
+        if slot == hand:
+            return True
+        if is_two_handed_weapon(inv) and slot in HAND_SLOTS:
+            return True
+    return False
+
+
+def get_item_in_slot(inventory_items, slot: str):
+    slot = normalize_equipped_slot(slot)
+    for inv in inventory_items:
+        if normalize_equipped_slot(inv.equipped_slot) == slot:
+            return inv
+    return None
+
+
 def armor_bonus_from_inventory(inventory_items) -> int:
     bonus = 0
     for inv in inventory_items:
-        if inv.equipped_slot == "armor" and inv.item_template:
+        if not inv.equipped_slot or not inv.item_template:
+            continue
+        if inv.item_template.item_type in ARMOR_ITEM_TYPES:
             bonus += inv.item_template.stats.get("armor_bonus", 0)
     return bonus
 
@@ -36,11 +87,19 @@ def weapon_attack_bonus(inventory_items, stats: dict) -> int:
     weapon_damage = 0
     relevant_stat = stats.get("strength", STAT_DEFAULT)
     for inv in inventory_items:
-        if inv.equipped_slot == "weapon" and inv.item_template:
-            weapon_damage = inv.item_template.stats.get("damage", 0)
-            if inv.item_template.stats.get("finesse"):
-                relevant_stat = max(relevant_stat, stats.get("dexterity", STAT_DEFAULT))
-            break
+        if not inv.equipped_slot or not inv.item_template:
+            continue
+        slot = normalize_equipped_slot(inv.equipped_slot)
+        if slot not in HAND_SLOTS:
+            continue
+        if inv.item_template.item_type not in ("weapon", "shield"):
+            continue
+        damage = inv.item_template.stats.get("damage", 0)
+        if inv.item_template.item_type == "shield":
+            damage = max(damage, 1)  # shields may add minor bash damage
+        weapon_damage = max(weapon_damage, damage)
+        if inv.item_template.stats.get("finesse"):
+            relevant_stat = max(relevant_stat, stats.get("dexterity", STAT_DEFAULT))
     return weapon_damage + relevant_stat // 3
 
 
@@ -63,7 +122,6 @@ def effective_stats(base_stats: dict, inventory_items, temporary_effects) -> dic
 
 
 def is_bag_only_item(item_template) -> bool:
-    """Items that work from the bag and must not be equipped."""
     if not item_template:
         return True
     if item_template.item_type in ("consumable", "key", "spell"):
@@ -71,10 +129,6 @@ def is_bag_only_item(item_template) -> bool:
     stats = item_template.stats or {}
     if stats.get("passive"):
         return True
-    # Stat-only accessories (e.g. "Bag power") have no weapon/armor role
-    if item_template.item_type == "accessory":
-        if not stats.get("damage") and not stats.get("armor_bonus"):
-            return True
     return False
 
 
@@ -83,19 +137,51 @@ def is_equippable(item_template) -> bool:
         return False
     if is_bag_only_item(item_template):
         return False
-    return item_template.item_type in ("weapon", "armor", "accessory")
+    return item_template.item_type in (
+        "weapon",
+        "shield",
+        "head",
+        "armor",
+        "gloves",
+        "legs",
+        "shoes",
+        "ring",
+        "necklace",
+    )
 
 
 def stacks_in_inventory(item_template) -> bool:
-    """Only consumables merge into one stack; everything else is separate."""
     return bool(item_template and item_template.item_type == "consumable")
 
 
-def equip_slot_for_item(item_template) -> str | None:
+def equip_slots_for_item(item_template) -> list[str]:
     if not is_equippable(item_template):
-        return None
-    if item_template.item_type == "weapon":
-        return "weapon"
-    if item_template.item_type == "armor":
-        return "armor"
-    return "accessory"
+        return []
+    mapping = {
+        "head": ["head"],
+        "armor": ["armor"],
+        "gloves": ["gloves"],
+        "legs": ["legs"],
+        "shoes": ["shoes"],
+        "necklace": ["necklace"],
+        "ring": ["ring_1", "ring_2"],
+        "weapon": list(HAND_SLOTS),
+        "shield": list(HAND_SLOTS),
+    }
+    return mapping.get(item_template.item_type, [])
+
+
+def slot_label(slot: str) -> str:
+    labels = {
+        "head": "Head",
+        "left_hand": "Left hand",
+        "right_hand": "Right hand",
+        "armor": "Armor",
+        "gloves": "Gloves",
+        "legs": "Legs",
+        "shoes": "Shoes",
+        "ring_1": "Ring 1",
+        "ring_2": "Ring 2",
+        "necklace": "Necklace",
+    }
+    return labels.get(slot, slot.replace("_", " ").title())

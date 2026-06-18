@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.config import settings
 from app.database import get_db
-from app.game.constants import EQUIP_SLOTS, STARTER_SKILLS, STAT_NAMES
+from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STARTER_SKILLS, STAT_NAMES
 from app.models import (
     Character,
     GroupMember,
@@ -22,9 +22,14 @@ from app.schemas import CharacterCreate, CharacterOut, EquipRequest, GiveItemReq
 from app.services.campaign_engine import broadcast_character_updated, recalculate_character_hp
 from app.services.character_stats import (
     effective_stats,
-    equip_slot_for_item,
+    equip_slots_for_item,
+    get_item_in_slot,
+    hand_is_occupied,
     is_bag_only_item,
     is_equippable,
+    is_two_handed_weapon,
+    normalize_equipped_slot,
+    slot_label,
     stacks_in_inventory,
     validate_point_buy,
     weapon_attack_bonus,
@@ -72,10 +77,11 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
                 "tier": i.item_template.tier if i.item_template else None,
                 "description": i.item_template.description if i.item_template else "",
                 "stats": i.item_template.stats if i.item_template else {},
-                "equipped_slot": i.equipped_slot,
+                "equipped_slot": normalize_equipped_slot(i.equipped_slot),
                 "quantity": i.quantity,
                 "equippable": is_equippable(i.item_template) if i.item_template else False,
                 "bag_only": is_bag_only_item(i.item_template) if i.item_template else True,
+                "equip_slots": equip_slots_for_item(i.item_template) if i.item_template else [],
             }
             for i in character.inventory_items
         ],
@@ -246,6 +252,11 @@ async def upload_portrait(
     return _serialize_character(db, character)
 
 
+@router.get("/equipment-slots")
+def list_equipment_slots() -> list[dict[str, str]]:
+    return [{"id": s, "label": slot_label(s)} for s in EQUIP_SLOTS]
+
+
 @router.post("/me/equip", response_model=CharacterOut)
 def equip_item(
     payload: EquipRequest,
@@ -258,24 +269,59 @@ def equip_item(
     inv = db.get(InventoryItem, payload.inventory_item_id)
     if not inv or inv.character_id != character.id:
         raise HTTPException(status_code=404, detail="Item not found")
-    slot = payload.slot
+
+    db.refresh(character, ["inventory_items"])
+    for row in character.inventory_items:
+        db.refresh(row, ["item_template"])
+
+    slot = normalize_equipped_slot(payload.slot) if payload.slot else None
+
+    if slot and slot not in EQUIP_SLOTS:
+        raise HTTPException(status_code=400, detail="Invalid slot")
+
     if slot:
         if not inv.item_template or not is_equippable(inv.item_template):
             raise HTTPException(status_code=400, detail="This item cannot be equipped")
-        allowed = equip_slot_for_item(inv.item_template)
-        if slot != allowed:
-            raise HTTPException(status_code=400, detail=f"This item must be equipped as {allowed}")
-    if slot and slot not in EQUIP_SLOTS:
-        raise HTTPException(status_code=400, detail="Invalid slot")
-    if slot:
-        existing = (
-            db.query(InventoryItem)
-            .filter(InventoryItem.character_id == character.id, InventoryItem.equipped_slot == slot)
-            .first()
-        )
-        if existing and existing.id != inv.id:
-            existing.equipped_slot = None
-    inv.equipped_slot = slot
+        allowed = equip_slots_for_item(inv.item_template)
+        if slot not in allowed:
+            raise HTTPException(status_code=400, detail=f"This item cannot be equipped in {slot_label(slot)}")
+
+        item_type = inv.item_template.item_type
+        stats = inv.item_template.stats or {}
+        two_handed = item_type == "weapon" and stats.get("two_handed")
+
+        if item_type in ("weapon", "shield"):
+            if slot not in HAND_SLOTS:
+                raise HTTPException(status_code=400, detail="Weapons and shields can only be equipped in hands")
+            if two_handed:
+                for hand in HAND_SLOTS:
+                    if hand_is_occupied(character.inventory_items, hand, except_id=inv.id):
+                        raise HTTPException(status_code=400, detail="Two-handed weapons require both hands free")
+                for hand in HAND_SLOTS:
+                    existing = get_item_in_slot(character.inventory_items, hand)
+                    if existing and existing.id != inv.id:
+                        existing.equipped_slot = None
+            else:
+                if hand_is_occupied(character.inventory_items, slot, except_id=inv.id):
+                    for hand in HAND_SLOTS:
+                        existing = get_item_in_slot(character.inventory_items, hand)
+                        if existing and existing.id != inv.id and is_two_handed_weapon(existing):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Cannot equip while a two-handed weapon is wielded",
+                            )
+                existing = get_item_in_slot(character.inventory_items, slot)
+                if existing and existing.id != inv.id:
+                    existing.equipped_slot = None
+        else:
+            existing = get_item_in_slot(character.inventory_items, slot)
+            if existing and existing.id != inv.id:
+                existing.equipped_slot = None
+
+        inv.equipped_slot = slot
+    else:
+        inv.equipped_slot = None
+
     recalculate_character_hp(db, character)
     db.commit()
     return _serialize_character(db, character)

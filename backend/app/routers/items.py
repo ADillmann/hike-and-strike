@@ -44,9 +44,9 @@ def update_item(
     db: Annotated[Session, Depends(get_db)],
 ) -> ItemTemplateOut:
     item = db.get(ItemTemplate, item_id)
-    if not item or item.is_system:
-        raise HTTPException(status_code=400, detail="Cannot edit system item")
-    if item.master_id != master.id:
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not item.is_system and item.master_id != master.id:
         raise HTTPException(status_code=404, detail="Item not found")
     for k, v in payload.model_dump().items():
         setattr(item, k, v)

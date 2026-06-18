@@ -25,9 +25,42 @@ STARTER_SKILLS = [
 HP_BASE = 10
 HP_PER_DURABILITY = 5
 
-EQUIP_SLOTS = ("weapon", "armor", "accessory")
+HAND_SLOTS = ("left_hand", "right_hand")
+
+EQUIP_SLOTS = (
+    "head",
+    "left_hand",
+    "right_hand",
+    "armor",
+    "gloves",
+    "legs",
+    "shoes",
+    "ring_1",
+    "ring_2",
+    "necklace",
+)
+
+# Legacy slots from earlier versions
+LEGACY_EQUIP_SLOTS = {"weapon": "right_hand", "accessory": "ring_1"}
 
 EVENT_TYPES = ("story", "puzzle", "rest", "generic", "battle_hook")
-ITEM_TYPES = ("weapon", "armor", "spell", "consumable", "key")
+
+ITEM_TYPES = (
+    "weapon",
+    "shield",
+    "head",
+    "armor",
+    "gloves",
+    "legs",
+    "shoes",
+    "ring",
+    "necklace",
+    "spell",
+    "consumable",
+    "key",
+)
+
+ARMOR_ITEM_TYPES = ("head", "armor", "gloves", "legs", "shoes", "shield")
+
 CAMPAIGN_STATUSES = ("draft", "active", "paused", "completed")
 OUTCOMES = ("success", "failure", "partial")
