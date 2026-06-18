@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.config import settings
 from app.database import get_db
-from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STAT_NAMES
+from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STAT_CAP, STAT_NAMES
 from app.models import (
     Character,
     GroupMember,
@@ -20,16 +20,25 @@ from app.models import (
     UserRole,
 )
 from app.schemas import (
+    AllocateStatRequest,
     AssignSkillRequest,
     CharacterCreate,
     CharacterOut,
     DiscardItemRequest,
     EquipRequest,
     GiveItemRequest,
+    GrantXpRequest,
+    ReleaseStatRequest,
     StatChangeOut,
     StatEditRequest,
     UseItemRequest,
     UseSkillRequest,
+)
+from app.services.character_progression import (
+    allocate_stat_point,
+    grant_xp,
+    progression_fields,
+    release_stat_point,
 )
 from app.services.skill_usage import use_skill_outside_battle
 from app.services.skill_effects import skill_battle_meta, skill_from_template
@@ -81,6 +90,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         .first()
     )
     eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
+    prog = progression_fields(character)
     return CharacterOut(
         id=character.id,
         user_id=character.user_id,
@@ -90,6 +100,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         stats=character.stats,
         max_hp=character.max_hp,
         current_hp=character.current_hp,
+        **prog,
         effective_stats=eff,
         attack_bonus=weapon_attack_bonus(character.inventory_items, eff),
         username=character.user.username if character.user else None,
@@ -276,6 +287,8 @@ async def edit_character_stats(
             )
             setattr(character, stat_name, new_value)
         elif stat_name in STAT_NAMES:
+            if new_value > STAT_CAP:
+                raise HTTPException(status_code=400, detail=f"{stat_name} cannot exceed {STAT_CAP}")
             old = character.stats.get(stat_name, 8)
             character.stats = {**character.stats, stat_name: new_value}
             db.add(
@@ -293,6 +306,69 @@ async def edit_character_stats(
     if "durability" in payload.changes:
         recalculate_character_hp(db, character, scale_current=payload.scale_hp_on_durability)
 
+    db.commit()
+    await broadcast_character_updated(db, character.id, payload.campaign_id)
+    return _serialize_character(db, character)
+
+
+@router.post("/me/allocate-stat", response_model=CharacterOut)
+async def allocate_my_stat(
+    payload: AllocateStatRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character yet")
+    try:
+        allocate_stat_point(db, character, payload.stat)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.stat == "durability":
+        recalculate_character_hp(db, character)
+    db.commit()
+    await broadcast_character_updated(db, character.id)
+    return _serialize_character(db, character)
+
+
+@router.post("/{character_id}/release-stat", response_model=CharacterOut)
+async def release_character_stat(
+    character_id: int,
+    payload: ReleaseStatRequest,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    try:
+        release_stat_point(db, character, payload.stat, master.id, payload.campaign_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.stat == "durability":
+        recalculate_character_hp(db, character)
+    db.commit()
+    await broadcast_character_updated(db, character.id, payload.campaign_id)
+    return _serialize_character(db, character)
+
+
+@router.post("/{character_id}/grant-xp", response_model=CharacterOut)
+async def grant_character_xp(
+    character_id: int,
+    payload: GrantXpRequest,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    from app.services.character_progression import character_in_active_battle
+
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    if character_in_active_battle(db, character.id):
+        raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="XP amount must be positive")
+    grant_xp(db, character, payload.amount, master.id, payload.campaign_id)
     db.commit()
     await broadcast_character_updated(db, character.id, payload.campaign_id)
     return _serialize_character(db, character)

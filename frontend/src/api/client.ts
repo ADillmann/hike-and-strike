@@ -57,6 +57,12 @@ export interface Character {
   stats: Record<string, number>;
   max_hp: number;
   current_hp: number;
+  level?: number;
+  xp?: number;
+  xp_to_next_level?: number;
+  stat_points_free?: number;
+  level_stat_allocations?: Record<string, number>;
+  stat_raise_costs?: Record<string, number>;
   effective_stats?: Record<string, number>;
   attack_bonus?: number;
   username?: string;

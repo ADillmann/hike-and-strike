@@ -28,7 +28,7 @@ interface InvItem {
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
 
-type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'remove';
+type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'xp' | 'remove';
 
 interface PendingRewardConfirm {
   action: RewardConfirmAction;
@@ -50,7 +50,7 @@ export function RewardsPanel({
   onApplied?: () => void;
   compact?: boolean;
 }) {
-  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'remove'>('item');
+  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'xp' | 'remove'>('item');
   const [rewardCharId, setRewardCharId] = useState(0);
   const [rewardItemId, setRewardItemId] = useState(0);
   const [wholeParty, setWholeParty] = useState(false);
@@ -62,6 +62,9 @@ export function RewardsPanel({
   const [buffCharId, setBuffCharId] = useState(0);
   const [hpCharId, setHpCharId] = useState(0);
   const [hpChange, setHpChange] = useState(-5);
+  const [xpWholeParty, setXpWholeParty] = useState(true);
+  const [xpCharId, setXpCharId] = useState(0);
+  const [xpAmount, setXpAmount] = useState(100);
   const [pendingConfirm, setPendingConfirm] = useState<PendingRewardConfirm | null>(null);
   const [removeCharId, setRemoveCharId] = useState(0);
   const [removeInvId, setRemoveInvId] = useState(0);
@@ -72,6 +75,7 @@ export function RewardsPanel({
       setRewardCharId(party[0].id);
       setBuffCharId(party[0].id);
       setHpCharId(party[0].id);
+      setXpCharId(party[0].id);
       setRemoveCharId(party[0].id);
     }
     if (items[0]) setRewardItemId(items[0].id);
@@ -137,6 +141,16 @@ export function RewardsPanel({
     await apply({
       punishments: {
         hp_reduction: [{ character_id: hpCharId, amount: hpChange }],
+      },
+    });
+  };
+
+  const grantXp = async () => {
+    if (xpAmount <= 0) return;
+    const targets = xpWholeParty ? party.map((p) => p.id) : [xpCharId];
+    await apply({
+      rewards: {
+        xp: targets.map((character_id) => ({ character_id, amount: xpAmount })),
       },
     });
   };
@@ -218,6 +232,26 @@ export function RewardsPanel({
     });
   };
 
+  const requestXpConfirm = () => {
+    if (xpAmount <= 0) return;
+    if (xpWholeParty) {
+      setPendingConfirm({
+        action: 'xp',
+        title: 'Grant XP',
+        message: `Grant ${xpAmount} XP to each party member (${party.length} characters)?`,
+        confirmLabel: 'Grant',
+      });
+      return;
+    }
+    const character = party.find((p) => p.id === xpCharId);
+    setPendingConfirm({
+      action: 'xp',
+      title: 'Grant XP',
+      message: `Grant ${xpAmount} XP to ${character?.name ?? 'character'}?`,
+      confirmLabel: 'Grant',
+    });
+  };
+
   const requestRemoveConfirm = () => {
     if (!removeInvId) return;
     const character = party.find((p) => p.id === removeCharId);
@@ -250,6 +284,9 @@ export function RewardsPanel({
       case 'hp':
         await applyHpChange();
         break;
+      case 'xp':
+        await grantXp();
+        break;
       case 'remove':
         await removeItem();
         break;
@@ -262,6 +299,7 @@ export function RewardsPanel({
     { id: 'buff' as const, label: 'Buff' },
     { id: 'debuff' as const, label: 'Debuff' },
     { id: 'hp' as const, label: 'HP' },
+    { id: 'xp' as const, label: 'XP' },
     { id: 'remove' as const, label: 'Remove' },
   ];
 
@@ -366,6 +404,27 @@ export function RewardsPanel({
             disabled={hpChange === 0}
           >
             Apply HP Change
+          </button>
+        </div>
+      )}
+
+      {tab === 'xp' && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={xpWholeParty} onChange={(e) => setXpWholeParty(e.target.checked)} />
+            Whole party (same amount each)
+          </label>
+          {!xpWholeParty && (
+            <select className="input" value={xpCharId} onChange={(e) => setXpCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <div>
+            <label className="label">XP amount</label>
+            <input className="input" type="number" min={1} value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} />
+          </div>
+          <button className="btn-secondary w-full" onClick={requestXpConfirm} disabled={xpAmount <= 0}>
+            Grant XP
           </button>
         </div>
       )}

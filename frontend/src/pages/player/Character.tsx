@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout, StatBadge } from '../../components/Layout';
 import type { Character } from '../../api/client';
@@ -123,6 +124,7 @@ export default function CharacterCreatePage() {
 
 export function CharacterSheetPage() {
   const [character, setCharacter] = useState<Character | null>(null);
+  const [pendingStat, setPendingStat] = useState<{ stat: string; cost: number } | null>(null);
   const navigate = useNavigate();
 
   const load = () => {
@@ -138,10 +140,19 @@ export function CharacterSheetPage() {
     load();
   };
 
+  const allocateStat = async () => {
+    if (!pendingStat) return;
+    await api.post('/characters/me/allocate-stat', { stat: pendingStat.stat });
+    setPendingStat(null);
+    load();
+  };
+
   if (!character) return <Layout title="Character">Loading...</Layout>;
 
   const eff = character.effective_stats || character.stats;
   const base = character.stats;
+  const freePoints = character.stat_points_free ?? 0;
+  const raiseCosts = character.stat_raise_costs ?? {};
 
   return (
     <Layout title="Character Sheet">
@@ -156,21 +167,42 @@ export function CharacterSheetPage() {
           <div>
             <h2 className="text-2xl font-bold text-dungeon-300">{character.name}</h2>
             <p className="text-stone-400">{character.race}</p>
+            <p className="mt-1">
+              Level {character.level ?? 1} — XP {character.xp ?? 0} / {character.xp_to_next_level ?? 100}
+            </p>
+            <p className="text-sm text-dungeon-300">Free stat points: {freePoints}</p>
             <p className="mt-1">HP: {character.current_hp} / {character.max_hp}</p>
             <p>Attack bonus: {character.attack_bonus ?? '—'}</p>
           </div>
         </div>
         <div className="mt-4">
-          <h3 className="mb-2 text-sm text-stone-400">Effective stats (base + gear + effects)</h3>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            {STAT_NAMES.map((s) => (
-              <div key={s}>
-                <StatBadge label={s.slice(0, 3)} value={eff[s] || base[s] || 8} />
-                {(eff[s] || 8) !== (base[s] || 8) && (
-                  <p className="text-center text-xs text-stone-500">base {base[s] || 8}</p>
-                )}
-              </div>
-            ))}
+          <h3 className="mb-2 text-sm text-stone-400">Base stats (cap 20)</h3>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {STAT_NAMES.map((s) => {
+              const current = base[s] || 8;
+              const cost = raiseCosts[s] ?? 0;
+              const canRaise = cost > 0 && freePoints >= cost;
+              return (
+                <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
+                  <div className="flex-1">
+                    <StatBadge label={s.slice(0, 3)} value={eff[s] || current} />
+                    <p className="text-center text-xs text-stone-500">
+                      base {current}/20
+                      {(eff[s] || current) !== current && ` (eff ${eff[s]})`}
+                    </p>
+                  </div>
+                  {canRaise && (
+                    <button
+                      type="button"
+                      className="btn-secondary px-2 py-0.5 text-xs"
+                      onClick={() => setPendingStat({ stat: s, cost })}
+                    >
+                      + ({cost} pt{cost !== 1 ? 's' : ''})
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
         {character.skills.length > 0 && (
@@ -194,6 +226,16 @@ export function CharacterSheetPage() {
           </div>
         )}
       </div>
+
+      {pendingStat && (
+        <ConfirmDialog
+          title="Allocate Stat Point"
+          message={`Spend ${pendingStat.cost} free point${pendingStat.cost !== 1 ? 's' : ''} to raise ${pendingStat.stat} by 1? This cannot be undone by you.`}
+          confirmLabel="Allocate"
+          onConfirm={allocateStat}
+          onCancel={() => setPendingStat(null)}
+        />
+      )}
     </Layout>
   );
 }

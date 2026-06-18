@@ -391,7 +391,7 @@ function AdvanceRewardBuilder({
   items: Item[];
   onChange: (payload: RewardsPayload) => void;
 }) {
-  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp'>('item');
+  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp'>('item');
   const [charId, setCharId] = useState(party[0]?.id || 0);
   const [itemId, setItemId] = useState(items[0]?.id || 0);
   const [randomWholeParty, setRandomWholeParty] = useState(true);
@@ -400,11 +400,15 @@ function AdvanceRewardBuilder({
   const [randomCount, setRandomCount] = useState(1);
   const [hpWholeParty, setHpWholeParty] = useState(false);
   const [hpChange, setHpChange] = useState(-5);
+  const [xpWholeParty, setXpWholeParty] = useState(true);
+  const [xpCharId, setXpCharId] = useState(party[0]?.id || 0);
+  const [xpAmount, setXpAmount] = useState(100);
 
   useEffect(() => {
     if (party[0]) {
       setCharId(party[0].id);
       setRandomCharId(party[0].id);
+      setXpCharId(party[0].id);
     }
     if (items[0]) setItemId(items[0].id);
   }, [party, items]);
@@ -441,6 +445,19 @@ function AdvanceRewardBuilder({
       }
       return;
     }
+    if (rewardType === 'xp' && xpAmount > 0) {
+      const targets = xpWholeParty ? party.map((p) => p.id) : [xpCharId].filter(Boolean);
+      if (targets.length) {
+        onChange({
+          rewards: {
+            xp: targets.map((character_id) => ({ character_id, amount: xpAmount })),
+          },
+        });
+      } else {
+        onChange({});
+      }
+      return;
+    }
     onChange({});
   }, [
     rewardType,
@@ -452,6 +469,9 @@ function AdvanceRewardBuilder({
     randomCharId,
     hpWholeParty,
     hpChange,
+    xpWholeParty,
+    xpCharId,
+    xpAmount,
     party,
     onChange,
   ]);
@@ -462,6 +482,7 @@ function AdvanceRewardBuilder({
         <option value="item">Grant item</option>
         <option value="random">Random tier loot</option>
         <option value="hp">HP change</option>
+        <option value="xp">Grant XP</option>
       </select>
 
       {rewardType === 'item' && (
@@ -550,6 +571,24 @@ function AdvanceRewardBuilder({
             <p className="mt-1 text-xs text-stone-500">
               Negative reduces current HP; positive heals (capped at max). Does not change max HP.
             </p>
+          </div>
+        </>
+      )}
+
+      {rewardType === 'xp' && (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={xpWholeParty} onChange={(e) => setXpWholeParty(e.target.checked)} />
+            Whole party (same amount each)
+          </label>
+          {!xpWholeParty && (
+            <select className="input" value={xpCharId} onChange={(e) => setXpCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <div>
+            <label className="label">XP amount</label>
+            <input className="input" type="number" min={1} value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} />
           </div>
         </>
       )}

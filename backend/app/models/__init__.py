@@ -39,6 +39,10 @@ class Character(Base):
     stats: Mapped[dict] = mapped_column(JSON, default=dict)
     max_hp: Mapped[int] = mapped_column(Integer, default=10)
     current_hp: Mapped[int] = mapped_column(Integer, default=10)
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    xp: Mapped[int] = mapped_column(Integer, default=0)
+    stat_points_free: Mapped[int] = mapped_column(Integer, default=0)
+    level_stat_allocations: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="character")
@@ -58,7 +62,7 @@ class StatChangeLog(Base):
     old_value: Mapped[int] = mapped_column(Integer)
     new_value: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    changed_by_master_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    changed_by_master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     campaign_id: Mapped[int | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

@@ -16,6 +16,7 @@ from app.models import (
     TemporaryEffect,
 )
 from app.services.character_stats import armor_bonus_from_inventory, compute_max_hp, stacks_in_inventory
+from app.services.character_progression import campaign_has_active_battle, grant_xp, progression_fields
 from app.websocket.manager import ws_manager
 
 
@@ -72,6 +73,7 @@ def _character_snapshot(character: Character) -> dict[str, Any]:
         "max_hp": character.max_hp,
         "current_hp": character.current_hp,
         "portrait_path": character.portrait_path,
+        **progression_fields(character),
     }
 
 
@@ -131,6 +133,18 @@ def apply_rewards_and_punishments(
     master_id: int,
 ) -> None:
     party_ids = [c.id for c in get_campaign_party(db, campaign)]
+
+    if rewards and rewards.get("xp"):
+        if campaign_has_active_battle(db, campaign.id):
+            raise ValueError("Cannot grant XP during an active battle")
+        for entry in rewards.get("xp", []):
+            char_id = entry.get("character_id")
+            amount = entry.get("amount", 0)
+            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+                continue
+            character = db.get(Character, char_id)
+            if character:
+                grant_xp(db, character, int(amount), master_id, campaign.id)
 
     if rewards:
         for entry in rewards.get("items", []):

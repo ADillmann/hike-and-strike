@@ -99,6 +99,12 @@ class CharacterOut(BaseModel):
     stats: dict[str, int]
     max_hp: int
     current_hp: int
+    level: int = 1
+    xp: int = 0
+    xp_to_next_level: int = 100
+    stat_points_free: int = 0
+    level_stat_allocations: dict[str, int] = Field(default_factory=dict)
+    stat_raise_costs: dict[str, int] = Field(default_factory=dict)
     effective_stats: dict[str, int] | None = None
     attack_bonus: int | None = None
     username: str | None = None
@@ -108,6 +114,20 @@ class CharacterOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AllocateStatRequest(BaseModel):
+    stat: str
+
+
+class ReleaseStatRequest(BaseModel):
+    stat: str
+    campaign_id: int | None = None
+
+
+class GrantXpRequest(BaseModel):
+    amount: int
+    campaign_id: int | None = None
 
 
 class StatEditRequest(BaseModel):

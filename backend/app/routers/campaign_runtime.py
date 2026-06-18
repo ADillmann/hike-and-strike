@@ -16,9 +16,14 @@ from app.services.campaign_engine import (
     clear_event_effects_for_party,
     get_campaign_party,
 )
+from app.services.character_progression import campaign_has_active_battle
 from app.websocket.manager import ws_manager
 
 router = APIRouter(prefix="/campaigns", tags=["campaign_runtime"])
+
+
+def _payload_has_xp(rewards: dict | None) -> bool:
+    return bool(rewards and rewards.get("xp"))
 
 
 @router.get("/{campaign_id}/state")
@@ -55,9 +60,14 @@ async def advance_campaign(
         apply_rest = False
 
     if payload.rewards or payload.punishments:
-        apply_rewards_and_punishments(
-            db, campaign, payload.rewards, payload.punishments, master.id
-        )
+        if _payload_has_xp(payload.rewards) and campaign_has_active_battle(db, campaign_id):
+            raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
+        try:
+            apply_rewards_and_punishments(
+                db, campaign, payload.rewards, payload.punishments, master.id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     history = EventHistory(
         campaign_id=campaign_id,
@@ -116,7 +126,12 @@ async def apply_rewards(
     campaign = db.get(Campaign, campaign_id)
     if not campaign or campaign.master_id != master.id:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    apply_rewards_and_punishments(db, campaign, payload.rewards, payload.punishments, master.id)
+    if _payload_has_xp(payload.rewards) and campaign_has_active_battle(db, campaign_id):
+        raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
+    try:
+        apply_rewards_and_punishments(db, campaign, payload.rewards, payload.punishments, master.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()
     for character in get_campaign_party(db, campaign):
         await broadcast_character_updated(db, character.id, campaign_id)

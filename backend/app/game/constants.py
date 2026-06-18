@@ -11,6 +11,10 @@ POINT_BUY_POOL = 27
 STAT_MIN = 8
 STAT_MAX = 15
 STAT_DEFAULT = 8
+STAT_CAP = 20
+
+STAT_POINTS_PER_LEVEL = 2
+XP_PER_LEVEL_BASE = 100
 
 RACES = ["Human", "Elf", "Dwarf", "Halfling", "Orc", "Tiefling"]
 

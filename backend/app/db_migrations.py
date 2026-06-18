@@ -1,5 +1,6 @@
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 
 def _table_columns(engine: Engine, table: str) -> set[str]:
@@ -16,6 +17,55 @@ def _add_column_if_missing(engine: Engine, table: str, column: str, ddl: str) ->
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
 
 
+def _column_nullable(engine: Engine, table: str, column: str) -> bool | None:
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return None
+    for col in insp.get_columns(table):
+        if col["name"] == column:
+            return col.get("nullable", False)
+    return None
+
+
+def _patch_stat_change_log_nullable_master(engine: Engine) -> None:
+    if _column_nullable(engine, "stat_change_log", "changed_by_master_id") is not False:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE stat_change_log_new (
+                    id INTEGER PRIMARY KEY,
+                    character_id INTEGER NOT NULL,
+                    stat_name VARCHAR(64) NOT NULL,
+                    old_value INTEGER NOT NULL,
+                    new_value INTEGER NOT NULL,
+                    reason TEXT,
+                    changed_by_master_id INTEGER REFERENCES users(id),
+                    campaign_id INTEGER REFERENCES campaigns(id),
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO stat_change_log_new (
+                    id, character_id, stat_name, old_value, new_value,
+                    reason, changed_by_master_id, campaign_id, timestamp
+                )
+                SELECT
+                    id, character_id, stat_name, old_value, new_value,
+                    reason, changed_by_master_id, campaign_id, timestamp
+                FROM stat_change_log
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE stat_change_log"))
+        conn.execute(text("ALTER TABLE stat_change_log_new RENAME TO stat_change_log"))
+
+
 def apply_schema_patches(engine: Engine) -> None:
     """Lightweight migrations for existing SQLite DBs (create_all does not alter tables)."""
     _add_column_if_missing(
@@ -30,3 +80,30 @@ def apply_schema_patches(engine: Engine) -> None:
         "cleared_on_event",
         "cleared_on_event BOOLEAN DEFAULT 0",
     )
+    _add_column_if_missing(engine, "characters", "level", "level INTEGER DEFAULT 1")
+    _add_column_if_missing(engine, "characters", "xp", "xp INTEGER DEFAULT 0")
+    _add_column_if_missing(engine, "characters", "stat_points_free", "stat_points_free INTEGER DEFAULT 0")
+    _add_column_if_missing(
+        engine,
+        "characters",
+        "level_stat_allocations",
+        "level_stat_allocations TEXT DEFAULT '{}'",
+    )
+    _patch_stat_change_log_nullable_master(engine)
+    _reconcile_all_character_stat_points(engine)
+
+
+def _reconcile_all_character_stat_points(engine: Engine) -> None:
+    from app.models import Character
+    from app.services.character_progression import sync_stat_points_free
+
+    with Session(engine) as session:
+        characters = session.query(Character).all()
+        changed = False
+        for character in characters:
+            before = character.stat_points_free
+            sync_stat_points_free(character)
+            if character.stat_points_free != before:
+                changed = True
+        if changed:
+            session.commit()

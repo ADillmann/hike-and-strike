@@ -19,6 +19,8 @@ interface SkillTemplateOption {
   max_uses_per_rest: number;
 }
 
+const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -37,6 +39,9 @@ export default function UsersPage() {
   const [statHistory, setStatHistory] = useState<StatLog[]>([]);
   const [pendingAddSkill, setPendingAddSkill] = useState<{ templateId: number; name: string } | null>(null);
   const [pendingRemoveSkill, setPendingRemoveSkill] = useState<{ skillId: number; name: string } | null>(null);
+  const [grantXpAmount, setGrantXpAmount] = useState(100);
+  const [pendingGrantXp, setPendingGrantXp] = useState(false);
+  const [pendingReleaseStat, setPendingReleaseStat] = useState<string | null>(null);
 
   const load = () => {
     api.get<UserInfo[]>('/users').then(setUsers);
@@ -62,10 +67,29 @@ export default function UsersPage() {
     }
   };
 
-  const openEditor = (c: Character) => {
-    setSelectedChar(c);
-    setEditStats({ ...c.stats, current_hp: c.current_hp, max_hp: c.max_hp });
+  const openEditor = async (c: Character) => {
+    const fresh = await api.get<Character>(`/characters/${c.id}`);
+    setSelectedChar(fresh);
+    setEditStats({ ...fresh.stats, current_hp: fresh.current_hp, max_hp: fresh.max_hp });
     setReason('');
+  };
+
+  const grantXp = async () => {
+    if (!selectedChar || grantXpAmount <= 0) return;
+    const updated = await api.post<Character>(`/characters/${selectedChar.id}/grant-xp`, { amount: grantXpAmount });
+    setSelectedChar(updated);
+    setEditStats({ ...updated.stats, current_hp: updated.current_hp, max_hp: updated.max_hp });
+    setPendingGrantXp(false);
+    load();
+  };
+
+  const releaseStat = async () => {
+    if (!selectedChar || !pendingReleaseStat) return;
+    const updated = await api.post<Character>(`/characters/${selectedChar.id}/release-stat`, { stat: pendingReleaseStat });
+    setSelectedChar(updated);
+    setEditStats({ ...updated.stats, current_hp: updated.current_hp, max_hp: updated.max_hp });
+    setPendingReleaseStat(null);
+    load();
   };
 
   const saveStats = async () => {
@@ -167,7 +191,7 @@ export default function UsersPage() {
             {characters.map((c) => (
               <div key={c.id} className="flex gap-2">
                 <button className="flex-1 rounded border border-dungeon-600 p-2 text-left hover:bg-dungeon-700" onClick={() => openEditor(c)}>
-                  {c.name} ({c.username}) — HP {c.current_hp}/{c.max_hp}
+                  {c.name} ({c.username}) — Lv {c.level ?? 1} — HP {c.current_hp}/{c.max_hp}
                 </button>
                 <button className="btn-secondary px-2 text-xs" onClick={() => openHistory(c.id)}>History</button>
               </div>
@@ -176,7 +200,42 @@ export default function UsersPage() {
           {selectedChar && (
             <div className="mt-4 space-y-3 border-t border-dungeon-600 pt-4">
               <h3 className="font-medium">{selectedChar.name}</h3>
+              <p className="text-sm text-stone-400">
+                Level {selectedChar.level ?? 1} — XP {selectedChar.xp ?? 0} / {selectedChar.xp_to_next_level ?? 100}
+                {' '}— Free stat points: {selectedChar.stat_points_free ?? 0}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  className="input w-28"
+                  type="number"
+                  min={1}
+                  value={grantXpAmount}
+                  onChange={(e) => setGrantXpAmount(+e.target.value)}
+                />
+                <button type="button" className="btn-secondary" onClick={() => setPendingGrantXp(true)} disabled={grantXpAmount <= 0}>
+                  Grant XP
+                </button>
+              </div>
               <StatEditor stats={editStats} onChange={(s, v) => setEditStats({ ...editStats, [s]: Math.max(1, v) })} />
+              <div className="space-y-1">
+                <p className="text-xs text-stone-500">Release level-allocated stat points back to free pool:</p>
+                <div className="flex flex-wrap gap-1">
+                  {STAT_NAMES.map((stat) => {
+                    const bumps = selectedChar.level_stat_allocations?.[stat] ?? 0;
+                    if (bumps <= 0) return null;
+                    return (
+                      <button
+                        key={stat}
+                        type="button"
+                        className="btn-danger px-2 py-0.5 text-xs"
+                        onClick={() => setPendingReleaseStat(stat)}
+                      >
+                        Release {stat.slice(0, 3)} ({bumps})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="label">Current HP</label>
@@ -262,6 +321,26 @@ export default function UsersPage() {
           confirmLabel="Remove"
           onConfirm={removeSkill}
           onCancel={() => setPendingRemoveSkill(null)}
+        />
+      )}
+
+      {pendingGrantXp && selectedChar && (
+        <ConfirmDialog
+          title="Grant XP"
+          message={`Grant ${grantXpAmount} XP to ${selectedChar.name}?`}
+          confirmLabel="Grant"
+          onConfirm={grantXp}
+          onCancel={() => setPendingGrantXp(false)}
+        />
+      )}
+
+      {pendingReleaseStat && selectedChar && (
+        <ConfirmDialog
+          title="Release Stat Point"
+          message={`Release one level-allocated point from ${selectedChar.name}'s ${pendingReleaseStat}? Points will return to their free pool.`}
+          confirmLabel="Release"
+          onConfirm={releaseStat}
+          onCancel={() => setPendingReleaseStat(null)}
         />
       )}
 
