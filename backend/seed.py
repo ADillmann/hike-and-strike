@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.game.constants import LEGACY_EQUIP_SLOTS
-from app.models import BattlePreset, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate
+from app.models import BattlePreset, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, Skill, SkillTemplate
 from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
 
 BASE_ITEMS = [
@@ -30,6 +30,14 @@ BASE_ENEMIES = [
     ("Bandit", {"strength": 10, "dexterity": 11, "intelligence": 8, "durability": 9, "charisma": 7, "initiative": 11, "damage": 4}, "A highway robber."),
     ("Wolf", {"strength": 9, "dexterity": 14, "intelligence": 4, "durability": 8, "charisma": 4, "initiative": 14, "damage": 3}, "A hungry predator."),
     ("Skeleton", {"strength": 9, "dexterity": 8, "intelligence": 4, "durability": 10, "charisma": 4, "initiative": 8, "damage": 3, "armor_bonus": 1}, "Undead warrior."),
+]
+
+BASE_SKILLS = [
+    ("Heal", 3, "Restore ally HP in battle.", "heal", {"heal_base": 5}),
+    ("Power Strike", 2, "A heavy melee attack.", "melee", {"bonus_damage": 3}),
+    ("Dodge", 2, "Grant temporary shield HP that lasts until battle ends.", "support", {"support_mode": "shield", "shield_amount": 8}),
+    ("Arcane Bolt", 3, "Ranged magical damage.", "range", {"bonus_damage": 0, "range_stat": "intelligence"}),
+    ("Inspire", 2, "Boost an ally's stats for the rest of the battle.", "support", {"support_mode": "stat_boost", "stat": "charisma", "stat_bonus": 2}),
 ]
 
 
@@ -66,6 +74,47 @@ def _ensure_system_presets(db: Session) -> None:
             ))
 
 
+def _ensure_system_skills(db: Session) -> None:
+    existing = {row.name for row in db.query(SkillTemplate).filter(SkillTemplate.is_system == True).all()}  # noqa: E712
+    for name, max_uses, desc, effect_type, params in BASE_SKILLS:
+        if name not in existing:
+            db.add(SkillTemplate(
+                name=name,
+                description=desc,
+                max_uses_per_rest=max_uses,
+                effect_type=effect_type,
+                effect_params=params,
+                selectable_at_creation=True,
+                is_system=True,
+            ))
+
+
+def migrate_character_skills(db: Session) -> None:
+    for skill in db.query(Skill).filter(Skill.skill_template_id.is_(None)).all():
+        template = db.query(SkillTemplate).filter(SkillTemplate.name == skill.name).first()
+        if template:
+            skill.skill_template_id = template.id
+
+
+def migrate_skill_effect_types(db: Session) -> None:
+    from app.game.constants import LEGACY_EFFECT_ALIASES
+
+    for template in db.query(SkillTemplate).all():
+        if template.effect_type in LEGACY_EFFECT_ALIASES:
+            template.effect_type = LEGACY_EFFECT_ALIASES[template.effect_type]
+    by_name = {
+        "Dodge": ("support", {"support_mode": "shield", "shield_amount": 8}),
+        "Inspire": ("support", {"support_mode": "stat_boost", "stat": "charisma", "stat_bonus": 2}),
+        "Power Strike": ("melee", {"bonus_damage": 3}),
+        "Arcane Bolt": ("range", {"bonus_damage": 0, "range_stat": "intelligence"}),
+    }
+    for name, (effect_type, params) in by_name.items():
+        row = db.query(SkillTemplate).filter(SkillTemplate.name == name, SkillTemplate.is_system == True).first()  # noqa: E712
+        if row:
+            row.effect_type = effect_type
+            row.effect_params = params
+
+
 def seed_data(db: Session) -> None:
     if db.query(EventTemplate).filter(EventTemplate.is_generic == True).count() == 0:  # noqa: E712
         generic_events = [
@@ -81,6 +130,9 @@ def seed_data(db: Session) -> None:
     _ensure_system_items(db)
     _ensure_system_enemies(db)
     _ensure_system_presets(db)
+    _ensure_system_skills(db)
 
     migrate_legacy_equipment(db)
+    migrate_skill_effect_types(db)
+    migrate_character_skills(db)
     db.commit()

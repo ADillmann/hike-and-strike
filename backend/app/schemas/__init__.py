@@ -55,11 +55,39 @@ class SkillCreate(BaseModel):
     max_uses_per_rest: int = 1
 
 
+class SkillTemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    max_uses_per_rest: int = 1
+    effect_type: str = "none"
+    effect_params: dict[str, Any] = Field(default_factory=dict)
+    selectable_at_creation: bool = True
+
+
+class SkillTemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    max_uses_per_rest: int
+    effect_type: str
+    effect_params: dict[str, Any]
+    selectable_at_creation: bool
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
+class AssignSkillRequest(BaseModel):
+    skill_template_id: int
+
+
 class CharacterCreate(BaseModel):
     name: str
     race: str
     stats: StatsDict
     skills: list[SkillCreate] = Field(default_factory=list)
+    skill_template_ids: list[int] = Field(default_factory=list)
 
 
 class CharacterOut(BaseModel):
@@ -215,6 +243,11 @@ class GiveItemRequest(BaseModel):
 
 class UseItemRequest(BaseModel):
     inventory_item_id: int
+
+
+class UseSkillRequest(BaseModel):
+    skill_id: int
+    target_character_id: int
 
 
 class DiscardItemRequest(BaseModel):

@@ -202,6 +202,25 @@ def apply_rest_to_party(db: Session, campaign: Campaign) -> None:
                 db.delete(effect)
 
 
+def clear_event_effects_for_party(db: Session, campaign: Campaign) -> None:
+    for character in get_campaign_party(db, campaign):
+        for effect in list(character.temporary_effects):
+            if effect.cleared_on_event:
+                db.delete(effect)
+
+
+def get_active_campaign_for_character(db: Session, character_id: int) -> Campaign | None:
+    group_ids = [m.group_id for m in db.query(GroupMember).filter(GroupMember.character_id == character_id).all()]
+    if not group_ids:
+        return None
+    return (
+        db.query(Campaign)
+        .filter(Campaign.group_id.in_(group_ids), Campaign.status.in_(["active", "paused"]))
+        .order_by(Campaign.id.desc())
+        .first()
+    )
+
+
 def recalculate_character_hp(db: Session, character: Character, scale_current: bool = False) -> None:
     db.refresh(character, ["inventory_items"])
     for inv in character.inventory_items:

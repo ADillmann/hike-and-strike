@@ -14,7 +14,20 @@ interface Actor {
   alive: boolean;
   initiative_value: number;
   attack_bonus: number;
-  skills?: { id: number; name: string; uses_remaining: number }[];
+  shield_hp?: number;
+  battle_stat_mods?: Record<string, number>;
+  skills?: { id: number; name: string; uses_remaining: number; effect_type?: string }[];
+}
+
+function normalizeEffect(type?: string): string {
+  if (type === 'power_strike') return 'melee';
+  if (type === 'arcane_bolt') return 'range';
+  return type || 'none';
+}
+
+function skillNeedsEnemyTarget(effectType?: string): boolean {
+  const t = normalizeEffect(effectType);
+  return t === 'melee' || t === 'range';
 }
 
 interface BattleState {
@@ -160,16 +173,25 @@ export default function BattlePage() {
                     ))}
                   </select>
                   <div className="flex flex-wrap gap-2">
-                    <button className="btn-primary" onClick={() => doAction('attack')} disabled={!targetId}>Attack</button>
-                    {myActor?.skills?.find((s) => s.name === 'Power Strike' && s.uses_remaining > 0) && (
-                      <button className="btn-secondary" onClick={() => doAction('power_strike')} disabled={!targetId}>Power Strike</button>
-                    )}
-                    {myActor?.skills?.find((s) => s.name === 'Heal' && s.uses_remaining > 0) && (
-                      <button className="btn-secondary" onClick={() => {
-                        const healSkill = myActor.skills?.find((s) => s.name === 'Heal');
-                        doAction('heal', healSkill?.id);
-                      }}>Heal</button>
-                    )}
+                    <button className="btn-primary" onClick={() => doAction('attack')} disabled={!targetId || !enemies.some((e) => e.id === targetId)}>Attack</button>
+                    {myActor?.skills
+                      ?.filter((s) => s.uses_remaining > 0 && normalizeEffect(s.effect_type) !== 'none')
+                      .map((s) => {
+                        const effect = normalizeEffect(s.effect_type);
+                        const disabled = skillNeedsEnemyTarget(effect)
+                          ? !targetId || !enemies.some((e) => e.id === targetId)
+                          : false;
+                        return (
+                          <button
+                            key={s.id}
+                            className="btn-secondary"
+                            onClick={() => doAction('skill', s.id)}
+                            disabled={disabled}
+                          >
+                            {s.name}
+                          </button>
+                        );
+                      })}
                   </div>
                 </>
               )}
@@ -196,6 +218,9 @@ export default function BattlePage() {
 }
 
 function ActorCard({ actor, isActive, isMe }: { actor: Actor; isActive?: boolean; isMe?: boolean }) {
+  const mods = actor.battle_stat_mods || {};
+  const modLines = Object.entries(mods).filter(([, v]) => v !== 0);
+
   return (
     <div className={`rounded border p-3 ${isActive ? 'border-dungeon-400 bg-dungeon-800' : 'border-dungeon-700'} ${!actor.alive ? 'opacity-50' : ''}`}>
       <div className="flex justify-between">
@@ -203,6 +228,14 @@ function ActorCard({ actor, isActive, isMe }: { actor: Actor; isActive?: boolean
         <span className="text-xs text-stone-500">{actor.type}</span>
       </div>
       <p className="text-sm">HP {actor.current_hp}/{actor.max_hp}</p>
+      {(actor.shield_hp ?? 0) > 0 && (
+        <p className="text-xs text-dungeon-300">Shield {actor.shield_hp}</p>
+      )}
+      {modLines.length > 0 && (
+        <p className="text-xs text-stone-500">
+          {modLines.map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(', ')}
+        </p>
+      )}
       {!actor.alive && <p className="text-xs text-red-400">Down</p>}
     </div>
   );

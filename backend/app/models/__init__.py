@@ -121,6 +121,22 @@ class ItemTemplate(Base):
     inventory_items: Mapped[list["InventoryItem"]] = relationship(back_populates="item_template")
 
 
+class SkillTemplate(Base):
+    __tablename__ = "skill_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+    max_uses_per_rest: Mapped[int] = mapped_column(Integer, default=1)
+    effect_type: Mapped[str] = mapped_column(String(32), default="none")
+    effect_params: Mapped[dict] = mapped_column(JSON, default=dict)
+    selectable_at_creation: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    character_skills: Mapped[list["Skill"]] = relationship(back_populates="skill_template")
+
+
 class Campaign(Base):
     __tablename__ = "campaigns"
 
@@ -191,11 +207,13 @@ class Skill(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    skill_template_id: Mapped[int | None] = mapped_column(ForeignKey("skill_templates.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(64))
     max_uses_per_rest: Mapped[int] = mapped_column(Integer, default=1)
     uses_remaining: Mapped[int] = mapped_column(Integer, default=1)
 
     character: Mapped["Character"] = relationship(back_populates="skills")
+    skill_template: Mapped["SkillTemplate | None"] = relationship(back_populates="character_skills")
 
 
 class TemporaryEffect(Base):
@@ -206,6 +224,7 @@ class TemporaryEffect(Base):
     label: Mapped[str] = mapped_column(String(128))
     stat_modifiers: Mapped[dict] = mapped_column(JSON, default=dict)
     cleared_on_rest: Mapped[bool] = mapped_column(Boolean, default=True)
+    cleared_on_event: Mapped[bool] = mapped_column(Boolean, default=False)
 
     character: Mapped["Character"] = relationship(back_populates="temporary_effects")
 

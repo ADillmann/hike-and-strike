@@ -60,7 +60,16 @@ export interface Character {
   effective_stats?: Record<string, number>;
   attack_bonus?: number;
   username?: string;
-  skills: { id: number; name: string; uses_remaining: number; max_uses_per_rest: number }[];
+  skills: {
+    id: number;
+    skill_template_id?: number | null;
+    name: string;
+    uses_remaining: number;
+    max_uses_per_rest: number;
+    effect_type?: string;
+    description?: string;
+    effect_params?: Record<string, string | number>;
+  }[];
   inventory: {
     id: number;
     name: string;

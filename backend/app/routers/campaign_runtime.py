@@ -13,6 +13,7 @@ from app.services.campaign_engine import (
     broadcast_campaign_state,
     broadcast_character_updated,
     campaign_state_payload,
+    clear_event_effects_for_party,
     get_campaign_party,
 )
 from app.websocket.manager import ws_manager
@@ -71,6 +72,7 @@ async def advance_campaign(
     if apply_rest:
         apply_rest_to_party(db, campaign)
 
+    clear_event_effects_for_party(db, campaign)
     campaign.current_node_id = payload.node_id
     if campaign.status == "draft":
         campaign.status = "active"
@@ -99,6 +101,8 @@ async def advance_campaign(
         },
     )
     await broadcast_campaign_state(db, campaign_id)
+    for character in get_campaign_party(db, campaign):
+        await broadcast_character_updated(db, character.id, campaign_id)
     return campaign_state_payload(db, campaign)
 
 

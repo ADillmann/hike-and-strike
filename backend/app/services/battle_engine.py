@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import Battle, Campaign, Character, EnemyTemplate, InventoryItem, Skill
 from app.services.character_stats import compute_max_hp, effective_stats, weapon_attack_bonus
+from app.services.skill_effects import normalize_effect_type, skill_battle_meta
 
 
 def _actor_id(actor_type: str, entity_id: int, index: int = 0) -> str:
@@ -46,6 +47,8 @@ def build_battle_state(
         db.refresh(character, ["inventory_items", "temporary_effects", "skills"])
         for inv in character.inventory_items:
             db.refresh(inv, ["item_template"])
+        for skill in character.skills:
+            db.refresh(skill, ["skill_template"])
         eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
         init_stat = eff.get("initiative", 8)
         per_turn = (1 + init_stat / 20) / total_combatants
@@ -62,8 +65,15 @@ def build_battle_state(
             "stats": eff,
             "attack_bonus": weapon_attack_bonus(character.inventory_items, eff),
             "alive": character.current_hp > 0,
+            "shield_hp": 0,
+            "battle_stat_mods": {},
             "skills": [
-                {"id": s.id, "name": s.name, "uses_remaining": s.uses_remaining}
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "uses_remaining": s.uses_remaining,
+                    **{k: skill_battle_meta(s)[k] for k in ("effect_type", "effect_params")},
+                }
                 for s in character.skills
             ],
         }
@@ -93,6 +103,8 @@ def build_battle_state(
                 "stats": stats,
                 "attack_bonus": stats.get("damage", 2) + stats.get("strength", 8) // 3,
                 "alive": True,
+                "shield_hp": 0,
+                "battle_stat_mods": {},
             })
 
     return {
@@ -182,6 +194,124 @@ def _check_battle_end(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def _actor_stat(actor: dict, stat: str) -> int:
+    base = actor.get("stats", {}).get(stat, 8)
+    mods = actor.get("battle_stat_mods") or {}
+    return base + int(mods.get(stat, 0))
+
+
+def _mitigation(target: dict) -> int:
+    return _actor_stat(target, "durability") // 4
+
+
+def _apply_damage(target: dict, damage: int) -> tuple[int, int]:
+    """Apply damage to shield first, then HP. Returns (hp_damage, shield_absorbed)."""
+    remaining = max(0, damage)
+    shield_absorbed = 0
+    shield = int(target.get("shield_hp") or 0)
+    if shield > 0 and remaining > 0:
+        shield_absorbed = min(shield, remaining)
+        target["shield_hp"] = shield - shield_absorbed
+        remaining -= shield_absorbed
+    hp_damage = 0
+    if remaining > 0:
+        hp_damage = remaining
+        target["current_hp"] = max(0, target["current_hp"] - remaining)
+        if target["current_hp"] <= 0:
+            target["alive"] = False
+    return hp_damage, shield_absorbed
+
+
+def _find_skill(actor: dict, skill_id: int | None, action: str) -> dict | None:
+    skills = actor.get("skills", [])
+    if skill_id is not None:
+        found = next((s for s in skills if s["id"] == skill_id), None)
+        if found:
+            found = dict(found)
+            found["effect_type"] = normalize_effect_type(found.get("effect_type", "none"))
+        return found
+    if action == "heal":
+        return next((s for s in skills if normalize_effect_type(s.get("effect_type", "")) == "heal"), None)
+    return None
+
+
+def _apply_skill(
+    actor: dict,
+    target: dict | None,
+    skill: dict,
+) -> str:
+    effect = normalize_effect_type(skill.get("effect_type", "none"))
+    params = skill.get("effect_params") or {}
+    name = skill.get("name", "Skill")
+
+    if effect == "heal":
+        if not target or target["type"] != "player" or not target["alive"]:
+            raise ValueError("Invalid heal target")
+        heal_base = int(params.get("heal_base", 5))
+        heal_amount = heal_base + _actor_stat(actor, "intelligence") // 2
+        target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal_amount)
+        skill["uses_remaining"] -= 1
+        return f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!"
+
+    if effect == "melee":
+        if not target or not target["alive"] or actor["type"] == target["type"]:
+            raise ValueError("Invalid target")
+        bonus = int(params.get("bonus_damage", 0))
+        roll = random.randint(1, 8)
+        damage = max(1, actor.get("attack_bonus", 0) + roll + bonus - _mitigation(target))
+        _, shield_abs = _apply_damage(target, damage)
+        skill["uses_remaining"] -= 1
+        msg = f"{actor['name']} uses {name} (melee) on {target['name']} for {damage} damage!"
+        if shield_abs:
+            msg += f" ({shield_abs} absorbed by shield)"
+        if not target["alive"]:
+            msg += f" {target['name']} is defeated!"
+        return msg
+
+    if effect == "range":
+        if not target or not target["alive"] or actor["type"] == target["type"]:
+            raise ValueError("Invalid target")
+        bonus = int(params.get("bonus_damage", 0))
+        range_stat = params.get("range_stat", "dexterity")
+        if range_stat not in actor.get("stats", {}):
+            range_stat = "dexterity"
+        roll = random.randint(1, 6)
+        damage = max(1, _actor_stat(actor, range_stat) // 2 + roll + bonus - _mitigation(target))
+        _, shield_abs = _apply_damage(target, damage)
+        skill["uses_remaining"] -= 1
+        msg = f"{actor['name']} uses {name} (range) on {target['name']} for {damage} damage!"
+        if shield_abs:
+            msg += f" ({shield_abs} absorbed by shield)"
+        if not target["alive"]:
+            msg += f" {target['name']} is defeated!"
+        return msg
+
+    if effect == "support":
+        if not target or target["type"] != "player" or not target["alive"]:
+            raise ValueError("Invalid support target")
+        mode = params.get("support_mode", "shield")
+        if mode == "shield":
+            amount = int(params.get("shield_amount", 5))
+            target["shield_hp"] = int(target.get("shield_hp") or 0) + amount
+            skill["uses_remaining"] -= 1
+            return f"{actor['name']} uses {name} — {target['name']} gains {amount} shield HP!"
+        if mode == "stat_boost":
+            stat = params.get("stat", "strength")
+            bonus = int(params.get("stat_bonus", 1))
+            mods = dict(target.get("battle_stat_mods") or {})
+            mods[stat] = int(mods.get(stat, 0)) + bonus
+            target["battle_stat_mods"] = mods
+            if stat == "strength":
+                actor_str_gain = bonus // 3
+                if actor_str_gain:
+                    target["attack_bonus"] = target.get("attack_bonus", 0) + actor_str_gain
+            skill["uses_remaining"] -= 1
+            return f"{actor['name']} uses {name} — {target['name']} gains +{bonus} {stat} for this battle!"
+        raise ValueError("Unknown support mode")
+
+    raise ValueError("Skill not usable in battle")
+
+
 def perform_action(
     state: dict[str, Any],
     actor_id: str,
@@ -211,46 +341,42 @@ def perform_action(
             return {**state, "actors": actors}, "Cannot attack allies"
 
         roll = random.randint(1, 6)
-        damage = max(1, actor.get("attack_bonus", 0) + roll - target["stats"].get("durability", 8) // 4)
-        target["current_hp"] = max(0, target["current_hp"] - damage)
-        if target["current_hp"] <= 0:
-            target["alive"] = False
+        damage = max(1, actor.get("attack_bonus", 0) + roll - _mitigation(target))
+        _, shield_abs = _apply_damage(target, damage)
         log_msg = f"{actor['name']} attacks {target['name']} for {damage} damage!"
+        if shield_abs:
+            log_msg += f" ({shield_abs} absorbed by shield)"
         if not target["alive"]:
             log_msg += f" {target['name']} is defeated!"
 
-    elif action == "heal":
+    elif action in ("skill", "heal", "power_strike"):
         if actor["type"] != "player":
-            return {**state, "actors": actors}, "Only players can heal"
-        skill = next((s for s in actor.get("skills", []) if s["id"] == skill_id), None)
+            return {**state, "actors": actors}, "Only players can use skills"
+        skill = _find_skill(actor, skill_id, action)
         if not skill or skill["uses_remaining"] <= 0:
             return {**state, "actors": actors}, "Skill unavailable"
-        target = actor
-        if target_id:
-            target = next((a for a in actors if a["id"] == target_id), None)
-        if not target or target["type"] != "player" or not target["alive"]:
-            return {**state, "actors": actors}, "Invalid heal target"
-        heal_amount = 5 + actor["stats"].get("intelligence", 8) // 2
-        target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal_amount)
-        skill["uses_remaining"] -= 1
-        log_msg = f"{actor['name']} heals {target['name']} for {heal_amount} HP!"
+        effect = normalize_effect_type(skill.get("effect_type", "none"))
+        if effect == "none":
+            return {**state, "actors": actors}, "Skill not usable in battle"
 
-    elif action == "power_strike":
-        if not target_id:
-            return {**state, "actors": actors}, "Target required"
-        target = next((a for a in actors if a["id"] == target_id), None)
-        if not target or not target["alive"] or actor["type"] == target["type"]:
-            return {**state, "actors": actors}, "Invalid target"
-        skill = next((s for s in actor.get("skills", []) if s.get("name") == "Power Strike"), None)
-        if not skill or skill["uses_remaining"] <= 0:
-            return {**state, "actors": actors}, "Power Strike unavailable"
-        roll = random.randint(1, 8)
-        damage = max(1, actor.get("attack_bonus", 0) + roll + 3 - target["stats"].get("durability", 8) // 4)
-        target["current_hp"] = max(0, target["current_hp"] - damage)
-        if target["current_hp"] <= 0:
-            target["alive"] = False
-        skill["uses_remaining"] -= 1
-        log_msg = f"{actor['name']} uses Power Strike on {target['name']} for {damage} damage!"
+        target = None
+        if effect in ("heal", "support"):
+            target = actor
+            if target_id:
+                target = next((a for a in actors if a["id"] == target_id), None)
+        else:
+            if not target_id:
+                return {**state, "actors": actors}, "Target required"
+            target = next((a for a in actors if a["id"] == target_id), None)
+
+        skill_ref = next((s for s in actor.get("skills", []) if s["id"] == skill["id"]), None)
+        if not skill_ref:
+            return {**state, "actors": actors}, "Skill unavailable"
+
+        try:
+            log_msg = _apply_skill(actor, target, skill_ref)
+        except ValueError as exc:
+            return {**state, "actors": actors}, str(exc)
 
     elif action == "enemy_attack":
         if actor["type"] != "enemy":
@@ -261,11 +387,11 @@ def perform_action(
         if not target or not target["alive"]:
             return {**state, "actors": actors}, "No valid target"
         roll = random.randint(1, 6)
-        damage = max(1, actor.get("attack_bonus", 0) + roll - target["stats"].get("durability", 8) // 4)
-        target["current_hp"] = max(0, target["current_hp"] - damage)
-        if target["current_hp"] <= 0:
-            target["alive"] = False
+        damage = max(1, actor.get("attack_bonus", 0) + roll - _mitigation(target))
+        _, shield_abs = _apply_damage(target, damage)
         log_msg = f"{actor['name']} attacks {target['name']} for {damage} damage!"
+        if shield_abs:
+            log_msg += f" ({shield_abs} absorbed by shield)"
         if not target["alive"]:
             log_msg += f" {target['name']} is down!"
 

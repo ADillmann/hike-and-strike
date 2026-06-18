@@ -22,6 +22,25 @@ STARTER_SKILLS = [
     {"name": "Inspire", "max_uses_per_rest": 2},
 ]
 
+SKILL_EFFECT_TYPES = ("none", "heal", "melee", "range", "support")
+
+SUPPORT_MODES = ("shield", "stat_boost")
+
+# Legacy name → effect when skill_template_id is missing
+LEGACY_SKILL_EFFECTS = {
+    "Heal": "heal",
+    "Power Strike": "melee",
+    "Arcane Bolt": "range",
+    "Dodge": "support",
+    "Inspire": "support",
+}
+
+# Legacy effect_type values still accepted in battle
+LEGACY_EFFECT_ALIASES = {
+    "power_strike": "melee",
+    "arcane_bolt": "range",
+}
+
 HP_BASE = 10
 HP_PER_DURABILITY = 5
 

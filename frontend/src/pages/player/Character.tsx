@@ -10,8 +10,10 @@ const DEFAULT_STATS = Object.fromEntries(STAT_NAMES.map((s) => [s, 8]));
 const MAX_SKILLS = 3;
 
 interface StarterSkill {
+  id: number;
   name: string;
   max_uses_per_rest: number;
+  description: string;
 }
 
 export default function CharacterCreatePage() {
@@ -20,7 +22,7 @@ export default function CharacterCreatePage() {
   const [name, setName] = useState('');
   const [race, setRace] = useState('Human');
   const [stats, setStats] = useState<Record<string, number>>(DEFAULT_STATS);
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<number[]>([]);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
@@ -37,11 +39,11 @@ export default function CharacterCreatePage() {
     setStats({ ...stats, [stat]: next });
   };
 
-  const toggleSkill = (skillName: string) => {
-    setSelectedSkills((prev) => {
-      if (prev.includes(skillName)) return prev.filter((s) => s !== skillName);
+  const toggleSkill = (skillId: number) => {
+    setSelectedSkillIds((prev) => {
+      if (prev.includes(skillId)) return prev.filter((s) => s !== skillId);
       if (prev.length >= MAX_SKILLS) return prev;
-      return [...prev, skillName];
+      return [...prev, skillId];
     });
   };
 
@@ -49,12 +51,9 @@ export default function CharacterCreatePage() {
     e.preventDefault();
     setError('');
     if (totalPoints > 27) { setError('Too many points spent'); return; }
-    if (selectedSkills.length < 1) { setError('Pick at least 1 skill'); return; }
+    if (selectedSkillIds.length < 1) { setError('Pick at least 1 skill'); return; }
     try {
-      const skills = starterSkills
-        .filter((s) => selectedSkills.includes(s.name))
-        .map((s) => ({ name: s.name, max_uses_per_rest: s.max_uses_per_rest }));
-      await api.post('/characters', { name, race, stats, skills });
+      await api.post('/characters', { name, race, stats, skill_template_ids: selectedSkillIds });
       navigate('/character');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -95,19 +94,23 @@ export default function CharacterCreatePage() {
         <div>
           <div className="mb-2 flex justify-between">
             <span className="label mb-0">Skills</span>
-            <span className="text-sm text-stone-400">{selectedSkills.length}/{MAX_SKILLS}</span>
+            <span className="text-sm text-stone-400">{selectedSkillIds.length}/{MAX_SKILLS}</span>
           </div>
           <div className="space-y-1">
             {starterSkills.map((s) => (
-              <label key={s.name} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
+              <label key={s.id} className="flex items-start gap-2 rounded border border-dungeon-600 p-2">
                 <input
                   type="checkbox"
-                  checked={selectedSkills.includes(s.name)}
-                  onChange={() => toggleSkill(s.name)}
-                  disabled={!selectedSkills.includes(s.name) && selectedSkills.length >= MAX_SKILLS}
+                  className="mt-1"
+                  checked={selectedSkillIds.includes(s.id)}
+                  onChange={() => toggleSkill(s.id)}
+                  disabled={!selectedSkillIds.includes(s.id) && selectedSkillIds.length >= MAX_SKILLS}
                 />
-                <span>{s.name}</span>
-                <span className="text-xs text-stone-500">({s.max_uses_per_rest}/rest)</span>
+                <div>
+                  <span>{s.name}</span>
+                  <span className="ml-1 text-xs text-stone-500">({s.max_uses_per_rest}/rest)</span>
+                  {s.description && <p className="text-xs text-stone-500">{s.description}</p>}
+                </div>
               </label>
             ))}
           </div>
@@ -170,6 +173,18 @@ export function CharacterSheetPage() {
             ))}
           </div>
         </div>
+        {character.skills.length > 0 && (
+          <div className="mt-4">
+            <h3 className="mb-2 text-sm text-stone-400">Skills</h3>
+            <div className="space-y-1">
+              {character.skills.map((s) => (
+                <div key={s.id} className="rounded border border-dungeon-700 px-2 py-1 text-sm">
+                  {s.name} — {s.uses_remaining}/{s.max_uses_per_rest} uses
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {character.temporary_effects.length > 0 && (
           <div className="mt-4">
             <h3 className="text-sm text-stone-400">Active effects</h3>

@@ -11,6 +11,7 @@ type InvItem = Character['inventory'][number];
 interface PartyMember {
   character_id: number;
   name: string;
+  is_self?: boolean;
 }
 
 type ItemAction = 'equip' | 'use' | 'passive' | 'none';
@@ -78,7 +79,7 @@ function ItemCard({
   onTrash?: (item: InvItem) => void;
 }) {
   const [giveOpen, setGiveOpen] = useState(false);
-  const [targetId, setTargetId] = useState(party[0]?.character_id || 0);
+  const [targetId, setTargetId] = useState(() => party.find((p) => !p.is_self)?.character_id || 0);
   const statLines = formatStats(item.stats);
   const inBag = !item.equipped_slot;
   const action = getItemAction(item);
@@ -89,7 +90,8 @@ function ItemCard({
     : slots;
 
   useEffect(() => {
-    if (party[0]) setTargetId(party[0].character_id);
+    const others = party.filter((p) => !p.is_self);
+    if (others[0]) setTargetId(others[0].character_id);
   }, [party]);
 
   return (
@@ -166,7 +168,7 @@ function ItemCard({
             ) : (
               <div className="flex w-full flex-wrap items-center gap-1">
                 <select className="input flex-1 py-1 text-xs" value={targetId} onChange={(e) => setTargetId(+e.target.value)}>
-                  {party.map((p) => (
+                  {party.filter((p) => !p.is_self).map((p) => (
                     <option key={p.character_id} value={p.character_id}>{p.name}</option>
                   ))}
                 </select>
@@ -310,7 +312,7 @@ export default function InventoryPage() {
 
   const equipped = character.inventory.filter((i) => i.equipped_slot);
   const bag = character.inventory.filter((i) => !i.equipped_slot);
-  const hasParty = party.length > 0;
+  const hasParty = party.some((p) => !p.is_self);
 
   return (
     <Layout title="Inventory">
@@ -322,7 +324,7 @@ export default function InventoryPage() {
         </p>
       )}
       {hasParty && (
-        <p className="mb-4 text-sm text-stone-500">Group: {party.map((p) => p.name).join(', ')}</p>
+        <p className="mb-4 text-sm text-stone-500">Group: {party.filter((p) => !p.is_self).map((p) => p.name).join(', ') || 'just you'}</p>
       )}
 
       <section className="card mb-4">

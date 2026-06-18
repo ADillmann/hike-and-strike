@@ -15,7 +15,12 @@ from app.services.battle_engine import (
     start_battle,
     sync_party_hp_to_characters,
 )
-from app.services.campaign_engine import broadcast_campaign_state, broadcast_character_updated, get_campaign_party
+from app.services.campaign_engine import (
+    broadcast_campaign_state,
+    broadcast_character_updated,
+    clear_event_effects_for_party,
+    get_campaign_party,
+)
 from app.websocket.manager import ws_manager
 
 router = APIRouter(prefix="/battles", tags=["battles"])
@@ -124,10 +129,17 @@ async def start_battle_endpoint(
     battle = _get_battle(db, battle_id, master)
     if battle.status != "pending":
         raise HTTPException(status_code=400, detail="Battle already started")
+    campaign = db.get(Campaign, battle.campaign_id)
+    if campaign:
+        clear_event_effects_for_party(db, campaign)
     state = start_battle(battle.state_json or {})
     battle.state_json = state
     battle.status = "active"
     db.commit()
+
+    if campaign:
+        for character in get_campaign_party(db, campaign):
+            await broadcast_character_updated(db, character.id, campaign.id)
 
     await ws_manager.broadcast(
         battle.campaign_id,

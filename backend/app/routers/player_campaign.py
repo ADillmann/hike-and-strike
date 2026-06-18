@@ -45,7 +45,22 @@ def list_races() -> list[str]:
 
 
 @router.get("/starter-skills")
-def starter_skills() -> list[dict]:
-    from app.game.constants import STARTER_SKILLS
+def starter_skills(db: Annotated[Session, Depends(get_db)]) -> list[dict]:
+    from app.models import SkillTemplate
 
-    return STARTER_SKILLS
+    rows = (
+        db.query(SkillTemplate)
+        .filter(SkillTemplate.selectable_at_creation == True)  # noqa: E712
+        .order_by(SkillTemplate.name)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "max_uses_per_rest": s.max_uses_per_rest,
+            "description": s.description,
+            "effect_type": s.effect_type,
+        }
+        for s in rows
+    ]

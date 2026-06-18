@@ -13,13 +13,21 @@ interface StatLog {
   timestamp: string;
 }
 
+interface SkillTemplateOption {
+  id: number;
+  name: string;
+  max_uses_per_rest: number;
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [skillTemplates, setSkillTemplates] = useState<SkillTemplateOption[]>([]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [selectedChar, setSelectedChar] = useState<Character | null>(null);
   const [editStats, setEditStats] = useState<Record<string, number>>({});
+  const [addSkillId, setAddSkillId] = useState(0);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [resetUserId, setResetUserId] = useState<number | null>(null);
@@ -27,10 +35,16 @@ export default function UsersPage() {
   const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
   const [historyCharId, setHistoryCharId] = useState<number | null>(null);
   const [statHistory, setStatHistory] = useState<StatLog[]>([]);
+  const [pendingAddSkill, setPendingAddSkill] = useState<{ templateId: number; name: string } | null>(null);
+  const [pendingRemoveSkill, setPendingRemoveSkill] = useState<{ skillId: number; name: string } | null>(null);
 
   const load = () => {
     api.get<UserInfo[]>('/users').then(setUsers);
     api.get<Character[]>('/characters').then(setCharacters);
+    api.get<SkillTemplateOption[]>('/skills').then((rows) => {
+      setSkillTemplates(rows);
+      if (rows[0]) setAddSkillId(rows[0].id);
+    });
   };
 
   useEffect(() => { load(); }, []);
@@ -66,6 +80,42 @@ export default function UsersPage() {
     load();
     setSelectedChar(null);
   };
+
+  const assignSkill = async () => {
+    if (!selectedChar || !pendingAddSkill) return;
+    const updated = await api.post<Character>(`/characters/${selectedChar.id}/skills`, {
+      skill_template_id: pendingAddSkill.templateId,
+    });
+    setSelectedChar(updated);
+    setPendingAddSkill(null);
+    load();
+  };
+
+  const removeSkill = async () => {
+    if (!selectedChar || !pendingRemoveSkill) return;
+    const updated = await api.delete<Character>(
+      `/characters/${selectedChar.id}/skills/${pendingRemoveSkill.skillId}`,
+    );
+    setSelectedChar(updated);
+    setPendingRemoveSkill(null);
+    load();
+  };
+
+  const requestAddSkill = () => {
+    if (!selectedChar || !addSkillId) return;
+    const template = skillTemplates.find((t) => t.id === addSkillId);
+    if (!template) return;
+    setPendingAddSkill({ templateId: template.id, name: template.name });
+  };
+
+  const requestRemoveSkill = (skillId: number, name: string) => {
+    setPendingRemoveSkill({ skillId, name });
+  };
+
+  const assignedTemplateIds = new Set(
+    (selectedChar?.skills || []).map((s) => s.skill_template_id).filter((id): id is number => id != null),
+  );
+  const availableToAssign = skillTemplates.filter((t) => !assignedTemplateIds.has(t.id));
 
   const doResetPassword = async () => {
     if (!resetUserId || !resetPassword) return;
@@ -138,6 +188,32 @@ export default function UsersPage() {
                 </div>
               </div>
               <input className="input" placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <div className="border-t border-dungeon-600 pt-3">
+                <h4 className="mb-2 font-medium text-dungeon-300">Skills</h4>
+                {selectedChar.skills.length === 0 && (
+                  <p className="mb-2 text-sm text-stone-500">No skills assigned.</p>
+                )}
+                <div className="space-y-1">
+                  {selectedChar.skills.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between rounded border border-dungeon-700 p-2 text-sm">
+                      <span>{s.name} ({s.uses_remaining}/{s.max_uses_per_rest})</span>
+                      <button type="button" className="btn-danger px-2 py-0.5 text-xs" onClick={() => requestRemoveSkill(s.id, s.name)}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {availableToAssign.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <select className="input flex-1" value={addSkillId} onChange={(e) => setAddSkillId(+e.target.value)}>
+                      {availableToAssign.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn-secondary" onClick={requestAddSkill}>Add skill</button>
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2">
                 <button className="btn-primary" onClick={saveStats}>Save Permanent Changes</button>
                 <button className="btn-secondary" onClick={() => setSelectedChar(null)}>Cancel</button>
@@ -166,6 +242,26 @@ export default function UsersPage() {
           message="This will permanently delete the user and their character. Continue?"
           onConfirm={doDeleteUser}
           onCancel={() => setDeleteUserId(null)}
+        />
+      )}
+
+      {pendingAddSkill && selectedChar && (
+        <ConfirmDialog
+          title="Add Skill"
+          message={`Add "${pendingAddSkill.name}" to ${selectedChar.name}?`}
+          confirmLabel="Add"
+          onConfirm={assignSkill}
+          onCancel={() => setPendingAddSkill(null)}
+        />
+      )}
+
+      {pendingRemoveSkill && selectedChar && (
+        <ConfirmDialog
+          title="Remove Skill"
+          message={`Remove "${pendingRemoveSkill.name}" from ${selectedChar.name}?`}
+          confirmLabel="Remove"
+          onConfirm={removeSkill}
+          onCancel={() => setPendingRemoveSkill(null)}
         />
       )}
 

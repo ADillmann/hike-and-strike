@@ -8,17 +8,31 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.config import settings
 from app.database import get_db
-from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STARTER_SKILLS, STAT_NAMES
+from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STAT_NAMES
 from app.models import (
     Character,
     GroupMember,
     InventoryItem,
     Skill,
+    SkillTemplate,
     StatChangeLog,
     User,
     UserRole,
 )
-from app.schemas import CharacterCreate, CharacterOut, EquipRequest, GiveItemRequest, StatChangeOut, StatEditRequest, UseItemRequest, DiscardItemRequest
+from app.schemas import (
+    AssignSkillRequest,
+    CharacterCreate,
+    CharacterOut,
+    DiscardItemRequest,
+    EquipRequest,
+    GiveItemRequest,
+    StatChangeOut,
+    StatEditRequest,
+    UseItemRequest,
+    UseSkillRequest,
+)
+from app.services.skill_usage import use_skill_outside_battle
+from app.services.skill_effects import skill_battle_meta, skill_from_template
 from app.services.campaign_engine import broadcast_character_updated, recalculate_character_hp
 from app.services.character_stats import (
     effective_stats,
@@ -38,13 +52,28 @@ from app.services.character_stats import (
 router = APIRouter(prefix="/characters", tags=["characters"])
 
 
+def _add_skill_templates(db: Session, character_id: int, template_ids: list[int]) -> None:
+    for template_id in template_ids:
+        template = db.get(SkillTemplate, template_id)
+        if not template:
+            raise HTTPException(status_code=400, detail=f"Unknown skill template {template_id}")
+        existing = (
+            db.query(Skill)
+            .filter(Skill.character_id == character_id, Skill.skill_template_id == template_id)
+            .first()
+        )
+        if existing:
+            continue
+        db.add(skill_from_template(character_id, template))
+
+
 def _serialize_character(db: Session, character: Character) -> CharacterOut:
     db.refresh(character)
     character = (
         db.query(Character)
         .options(
             joinedload(Character.inventory_items).joinedload(InventoryItem.item_template),
-            joinedload(Character.skills),
+            joinedload(Character.skills).joinedload(Skill.skill_template),
             joinedload(Character.temporary_effects),
             joinedload(Character.user),
         )
@@ -65,7 +94,14 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         attack_bonus=weapon_attack_bonus(character.inventory_items, eff),
         username=character.user.username if character.user else None,
         skills=[
-            {"id": s.id, "name": s.name, "uses_remaining": s.uses_remaining, "max_uses_per_rest": s.max_uses_per_rest}
+            {
+                "id": s.id,
+                "skill_template_id": s.skill_template_id,
+                "name": s.name,
+                "uses_remaining": s.uses_remaining,
+                "max_uses_per_rest": s.max_uses_per_rest,
+                **skill_battle_meta(s),
+            }
             for s in character.skills
         ],
         inventory=[
@@ -127,21 +163,65 @@ def create_character(
     )
     db.add(character)
     db.flush()
-    if payload.skills:
-        skill_list = payload.skills
+    if payload.skill_template_ids:
+        _add_skill_templates(db, character.id, payload.skill_template_ids)
+    elif payload.skills:
+        for sk in payload.skills:
+            template = db.query(SkillTemplate).filter(SkillTemplate.name == sk.name).first()
+            if template:
+                db.add(skill_from_template(character.id, template))
+            else:
+                db.add(
+                    Skill(
+                        character_id=character.id,
+                        name=sk.name,
+                        max_uses_per_rest=sk.max_uses_per_rest,
+                        uses_remaining=sk.max_uses_per_rest,
+                    )
+                )
     else:
-        from app.schemas import SkillCreate
-
-        skill_list = [SkillCreate(**s) for s in STARTER_SKILLS[:2]]
-    for sk in skill_list:
-        db.add(
-            Skill(
-                character_id=character.id,
-                name=sk.name,
-                max_uses_per_rest=sk.max_uses_per_rest,
-                uses_remaining=sk.max_uses_per_rest,
-            )
+        defaults = (
+            db.query(SkillTemplate)
+            .filter(SkillTemplate.selectable_at_creation == True)  # noqa: E712
+            .order_by(SkillTemplate.name)
+            .limit(2)
+            .all()
         )
+        for template in defaults:
+            db.add(skill_from_template(character.id, template))
+    db.commit()
+    return _serialize_character(db, character)
+
+
+@router.post("/{character_id}/skills", response_model=CharacterOut)
+def assign_skill(
+    character_id: int,
+    payload: AssignSkillRequest,
+    _: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    _add_skill_templates(db, character.id, [payload.skill_template_id])
+    db.commit()
+    return _serialize_character(db, character)
+
+
+@router.delete("/{character_id}/skills/{skill_id}", response_model=CharacterOut)
+def remove_skill(
+    character_id: int,
+    skill_id: int,
+    _: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    skill = db.get(Skill, skill_id)
+    if not skill or skill.character_id != character.id:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    db.delete(skill)
     db.commit()
     return _serialize_character(db, character)
 
@@ -350,22 +430,22 @@ def get_party_members(
     if not character:
         raise HTTPException(status_code=404, detail="No character")
     group_ids = [m.group_id for m in db.query(GroupMember).filter(GroupMember.character_id == character.id).all()]
+    result = [{"character_id": character.id, "name": character.name, "is_self": True}]
     if not group_ids:
-        return []
+        return result
+    seen = {character.id}
     members = (
         db.query(GroupMember)
         .filter(GroupMember.group_id.in_(group_ids), GroupMember.character_id != character.id)
         .all()
     )
-    seen: set[int] = set()
-    result = []
     for m in members:
         if m.character_id in seen:
             continue
         seen.add(m.character_id)
         c = db.get(Character, m.character_id)
         if c:
-            result.append({"character_id": c.id, "name": c.name})
+            result.append({"character_id": c.id, "name": c.name, "is_self": False})
     return result
 
 
@@ -464,6 +544,35 @@ async def use_item(
 
     db.commit()
     return _serialize_character(db, character)
+
+
+@router.post("/me/use-skill", response_model=CharacterOut)
+async def use_skill(
+    payload: UseSkillRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CharacterOut:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+
+    try:
+        caster, target = use_skill_outside_battle(
+            db,
+            character,
+            payload.skill_id,
+            payload.target_character_id,
+            share_group=_share_group,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    if target.id != caster.id:
+        await broadcast_character_updated(db, target.id)
+    return _serialize_character(db, caster)
 
 
 @router.post("/me/discard-item", response_model=CharacterOut)

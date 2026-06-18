@@ -18,6 +18,7 @@ from app.routers import (
     groups,
     items,
     player_campaign,
+    skills,
     users,
     websocket,
 )
@@ -29,6 +30,9 @@ async def lifespan(_: FastAPI):
     import app.models  # noqa: F401 — register models
 
     Base.metadata.create_all(bind=engine)
+    from app.db_migrations import apply_schema_patches
+
+    apply_schema_patches(engine)
     db = SessionLocal()
     try:
         seed_data(db)
@@ -54,6 +58,7 @@ api.include_router(characters.router)
 api.include_router(groups.router)
 api.include_router(events.router)
 api.include_router(items.router)
+api.include_router(skills.router)
 api.include_router(campaigns.router)
 api.include_router(campaign_runtime.router)
 api.include_router(player_campaign.router)
