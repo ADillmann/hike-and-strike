@@ -276,6 +276,7 @@ class SecretInteractionOut(BaseModel):
 class SecretSolveResponse(BaseModel):
     success: bool
     message: str
+    rewards_summary: list[str] = Field(default_factory=list)
     character: CharacterOut
 
 

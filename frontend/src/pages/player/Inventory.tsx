@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
+import { AlertDialog } from '../../components/AlertDialog';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { SOLVER_MODALS } from '../../components/secrets/solverRegistry';
 import { EQUIP_SLOTS, slotLabel } from '../../game/equipment';
@@ -276,6 +277,7 @@ export default function InventoryPage() {
   const [solveItem, setSolveItem] = useState<InvItem | null>(null);
   const [solveBusy, setSolveBusy] = useState(false);
   const [secretMessages, setSecretMessages] = useState<Record<number, string>>({});
+  const [solveRewardSummary, setSolveRewardSummary] = useState<string[] | null>(null);
   const navigate = useNavigate();
 
   const load = () => {
@@ -337,7 +339,7 @@ export default function InventoryPage() {
     setError('');
     setSolveBusy(true);
     try {
-      const res = await api.post<{ success: boolean; message: string; character: Character }>(
+      const res = await api.post<{ success: boolean; message: string; rewards_summary: string[]; character: Character }>(
         '/characters/me/solve-secret-item',
         { inventory_item_id: solveItem.id, guess },
       );
@@ -349,6 +351,7 @@ export default function InventoryPage() {
       if (res.success) {
         setSolveItem(null);
         setCharacter(res.character);
+        setSolveRewardSummary(res.rewards_summary ?? []);
         api.get<PartyMember[]>('/characters/me/party').then(setParty).catch(() => setParty([]));
       } else {
         setSecretMessages((prev) => ({ ...prev, [solveItem.id]: res.message }));
@@ -463,6 +466,23 @@ export default function InventoryPage() {
           />
         );
       })()}
+
+      {solveRewardSummary !== null && (
+        <AlertDialog
+          title="Secret solved!"
+          onClose={() => setSolveRewardSummary(null)}
+        >
+          {solveRewardSummary.length > 0 ? (
+            <ul className="list-inside list-disc space-y-1 text-sm text-stone-300">
+              {solveRewardSummary.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-stone-400">Nothing else was found inside.</p>
+          )}
+        </AlertDialog>
+      )}
     </Layout>
   );
 }

@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy.orm import Session, joinedload
 
 from app.game.constants import STAT_NAMES
-from app.models import Character, InventoryItem, ItemTemplate, SecretTemplate
+from app.models import Character, EffectTemplate, InventoryItem, ItemTemplate, SecretTemplate
 from app.services.campaign_engine import apply_effect_template, grant_item
 from app.services.character_progression import campaign_has_active_battle, grant_xp
 from app.services.character_stats import effective_stats
@@ -41,27 +41,37 @@ def run_examine_check(character: Character, secret: SecretTemplate) -> tuple[boo
     return roll >= dc, roll, dc
 
 
-def apply_secret_rewards(db: Session, character_id: int, rewards: dict | None) -> None:
+def apply_secret_rewards(db: Session, character_id: int, rewards: dict | None) -> list[str]:
+    summary: list[str] = []
     if not rewards:
-        return
+        return summary
     character = db.get(Character, character_id)
     if not character:
-        return
+        return summary
 
     for entry in rewards.get("items", []):
         item_id = entry.get("item_template_id") if isinstance(entry, dict) else entry
         if item_id:
+            template = db.get(ItemTemplate, int(item_id))
             grant_item(db, character_id, int(item_id))
+            if template:
+                summary.append(f"Item: {template.name}")
 
     xp = rewards.get("xp")
     if isinstance(xp, (int, float)) and xp > 0:
         if not _xp_blocked_in_battle(db, character_id):
             grant_xp(db, character, int(xp), None, None)
+            summary.append(f"+{int(xp)} XP")
 
     for entry in rewards.get("temp_effects", []):
         template_id = entry.get("effect_template_id") if isinstance(entry, dict) else None
         if template_id:
+            effect = db.get(EffectTemplate, int(template_id))
             apply_effect_template(db, character_id, int(template_id))
+            if effect:
+                summary.append(f"Effect: {effect.label or effect.name}")
+
+    return summary
 
 
 def get_secret_inventory_item(db: Session, character_id: int, inventory_item_id: int) -> InventoryItem:
@@ -136,10 +146,10 @@ def solve_secret_item(
 
     solver = get_solver(secret.solver_type)
     if solver.verify_guess(secret.solver_config or {}, guess):
-        apply_secret_rewards(db, character.id, secret.rewards or {})
+        rewards_summary = apply_secret_rewards(db, character.id, secret.rewards or {})
         if secret.consume_on_solve:
             db.delete(inv)
-        return {"success": True, "message": "Success!"}
+        return {"success": True, "message": "Success!", "rewards_summary": rewards_summary}
 
     return {
         "success": False,

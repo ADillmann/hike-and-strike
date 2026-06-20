@@ -732,6 +732,7 @@ async def solve_secret_item_endpoint(
     return SecretSolveResponse(
         success=result["success"],
         message=result["message"],
+        rewards_summary=result.get("rewards_summary", []),
         character=_serialize_character(db, character),
     )
 
