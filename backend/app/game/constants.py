@@ -68,7 +68,7 @@ EQUIP_SLOTS = (
 # Legacy slots from earlier versions
 LEGACY_EQUIP_SLOTS = {"weapon": "right_hand", "accessory": "ring_1"}
 
-EVENT_TYPES = ("story", "puzzle", "rest", "generic", "battle_hook")
+EVENT_TYPES = ("story", "puzzle", "rest", "generic", "battle_hook", "shop")
 
 ITEM_TYPES = (
     "weapon",

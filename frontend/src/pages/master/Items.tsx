@@ -11,6 +11,7 @@ interface Item {
   description: string;
   stats: Record<string, unknown>;
   secret_template_id?: number | null;
+  base_price: number;
   is_system: boolean;
 }
 
@@ -47,6 +48,7 @@ type ItemForm = {
   two_handed: boolean;
   passive: boolean;
   secret_template_id: number;
+  base_price: number;
 };
 
 const defaultForm = (): ItemForm => ({
@@ -66,6 +68,7 @@ const defaultForm = (): ItemForm => ({
   two_handed: false,
   passive: false,
   secret_template_id: 0,
+  base_price: 0,
 });
 
 function numStat(stats: Record<string, unknown>, key: string): number {
@@ -92,6 +95,7 @@ function formFromItem(item: Item): ItemForm {
     two_handed: Boolean(s.two_handed),
     passive: Boolean(s.passive),
     secret_template_id: item.secret_template_id ?? 0,
+    base_price: item.base_price ?? 0,
   };
 }
 
@@ -202,6 +206,17 @@ function ItemFormFields({
         />
       </div>
       <div>
+        <label className="label">Base price (copper)</label>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          value={form.base_price}
+          onChange={(e) => set('base_price', +e.target.value)}
+        />
+        <p className="mt-1 text-xs text-stone-500">Shop buy/sell prices use this value in copper.</p>
+      </div>
+      <div>
         <label className="label">Description</label>
         <textarea className="input" value={form.description} onChange={(e) => set('description', e.target.value)} />
       </div>
@@ -310,6 +325,7 @@ export default function ItemsPage() {
     description: f.description,
     stats: buildStats(f),
     secret_template_id: f.item_type === 'secret' ? f.secret_template_id || null : null,
+    base_price: f.base_price,
   });
 
   const create = async (e: React.FormEvent) => {
@@ -353,6 +369,9 @@ export default function ItemsPage() {
                     <span className="font-medium">{item.name}</span>
                     <span className="shrink-0 text-stone-500">T{item.tier} {item.item_type}</span>
                   </div>
+                  {(item.base_price ?? 0) > 0 && (
+                    <p className="text-xs text-dungeon-400">{item.base_price} copper</p>
+                  )}
                   <div className="text-xs text-dungeon-400">
                     {item.is_system && <span>(base)</span>}
                     {Boolean(item.stats.passive) && <span className="ml-1">(passive)</span>}

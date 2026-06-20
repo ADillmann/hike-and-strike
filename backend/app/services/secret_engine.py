@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.game.constants import STAT_NAMES
 from app.models import Character, EffectTemplate, InventoryItem, ItemTemplate, SecretTemplate
-from app.services.campaign_engine import apply_effect_template, grant_item
+from app.services.campaign_engine import apply_effect_template, grant_item, grant_wallet
 from app.services.character_progression import campaign_has_active_battle, grant_xp
 from app.services.character_stats import effective_stats
 from app.services.secret_solvers import get_solver, validate_solver_type
@@ -62,6 +62,14 @@ def apply_secret_rewards(db: Session, character_id: int, rewards: dict | None) -
         if not _xp_blocked_in_battle(db, character_id):
             grant_xp(db, character, int(xp), None, None)
             summary.append(f"+{int(xp)} XP")
+
+    wallet = rewards.get("wallet")
+    if isinstance(wallet, (int, float)) and wallet != 0:
+        grant_wallet(db, character_id, int(wallet))
+        if wallet > 0:
+            summary.append(f"+{int(wallet)} copper")
+        else:
+            summary.append(f"{int(wallet)} copper")
 
     for entry in rewards.get("temp_effects", []):
         template_id = entry.get("effect_template_id") if isinstance(entry, dict) else None

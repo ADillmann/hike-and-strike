@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
+import { ShopModal } from '../../components/shop/ShopModal';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 import type { Character } from '../../api/client';
 import { formatBattleMods, formatStatMods } from '../../utils/effects';
@@ -10,7 +11,13 @@ interface CampaignView {
   name?: string;
   status?: string;
   current_node?: {
-    event: { name: string; description: string; event_type: string; images: string[] };
+    event: {
+      name: string;
+      description: string;
+      event_type: string;
+      images: string[];
+      shop_config?: { allowed_tiers: number[]; buy_modifier_percent: number };
+    };
   };
   party?: { name: string; current_hp: number; max_hp: number }[];
 }
@@ -19,6 +26,7 @@ export default function CampaignPage() {
   const [data, setData] = useState<CampaignView>({ active: false });
   const [campaignId, setCampaignId] = useState<number | null>(null);
   const [myCharacter, setMyCharacter] = useState<Character | null>(null);
+  const [shopOpen, setShopOpen] = useState(false);
 
   const load = useCallback(() => {
     api.get<CampaignView & { campaign_id?: number }>('/player/campaign/active').then((d) => {
@@ -67,6 +75,15 @@ export default function CampaignPage() {
               A battle is coming — wait for the Master to start combat.
             </p>
           )}
+          {data.current_node?.event.event_type === 'shop' && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" className="btn-primary" onClick={() => setShopOpen(true)}>Buy</button>
+              <button type="button" className="btn-secondary" onClick={() => setShopOpen(true)}>Sell</button>
+              {myCharacter?.wallet_display && (
+                <span className="self-center text-sm text-stone-400">Wallet: {myCharacter.wallet_display}</span>
+              )}
+            </div>
+          )}
         </section>
         <section className="card">
           <h3 className="mb-2 font-semibold text-dungeon-300">Party</h3>
@@ -96,6 +113,13 @@ export default function CampaignPage() {
           <p className="mt-4 text-xs text-stone-500">Discuss with your group. The Master will advance the story.</p>
         </section>
       </div>
+
+      {shopOpen && (
+        <ShopModal
+          onClose={() => setShopOpen(false)}
+          onUpdated={(character) => setMyCharacter(character)}
+        />
+      )}
     </Layout>
   );
 }

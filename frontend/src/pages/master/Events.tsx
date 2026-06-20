@@ -11,11 +11,68 @@ interface EventTemplate {
   event_type: string;
   is_generic: boolean;
   images: string[];
+  shop_config?: ShopConfig | null;
+}
+
+interface ShopConfig {
+  allowed_tiers: number[];
+  buy_modifier_percent: number;
+}
+
+const defaultShopConfig = (): ShopConfig => ({
+  allowed_tiers: [1],
+  buy_modifier_percent: 0,
+});
+
+function ShopConfigEditor({
+  config,
+  onChange,
+}: {
+  config: ShopConfig;
+  onChange: (config: ShopConfig) => void;
+}) {
+  const toggleTier = (tier: number) => {
+    const tiers = config.allowed_tiers.includes(tier)
+      ? config.allowed_tiers.filter((t) => t !== tier)
+      : [...config.allowed_tiers, tier].sort();
+    onChange({ ...config, allowed_tiers: tiers.length ? tiers : [1] });
+  };
+
+  return (
+    <fieldset className="space-y-2 rounded border border-dungeon-700 p-3">
+      <legend className="px-1 text-sm font-medium text-dungeon-300">Shop settings</legend>
+      <div>
+        <label className="label">Allowed item tiers</label>
+        <div className="flex flex-wrap gap-3">
+          {[1, 2, 3, 4, 5].map((tier) => (
+            <label key={tier} className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                checked={config.allowed_tiers.includes(tier)}
+                onChange={() => toggleTier(tier)}
+              />
+              Tier {tier}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="label">Buy price modifier (%)</label>
+        <input
+          className="input"
+          type="number"
+          value={config.buy_modifier_percent}
+          onChange={(e) => onChange({ ...config, buy_modifier_percent: +e.target.value })}
+        />
+        <p className="mt-1 text-xs text-stone-500">Positive = markup on buy price. Sell is always 50% of base price.</p>
+      </div>
+    </fieldset>
+  );
 }
 
 export default function EventsPage() {
   const [events, setEvents] = useState<EventTemplate[]>([]);
-  const [form, setForm] = useState({ name: '', description: '', event_type: 'story' });
+  const [form, setForm] = useState({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig() });
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [editing, setEditing] = useState<EventTemplate | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -58,11 +115,13 @@ export default function EventsPage() {
     e.preventDefault();
     setError('');
     try {
-      const created = await api.post<EventTemplate>('/events', form);
+      const payload: Record<string, unknown> = { ...form };
+      if (form.event_type !== 'shop') delete payload.shop_config;
+      const created = await api.post<EventTemplate>('/events', payload);
       for (const file of pendingImages) {
         await uploadImage(created.id, file);
       }
-      setForm({ name: '', description: '', event_type: 'story' });
+      setForm({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig() });
       setPendingImages([]);
       load();
     } catch (err) {
@@ -74,11 +133,15 @@ export default function EventsPage() {
     if (!editing) return;
     setError('');
     try {
-      await api.patch(`/events/${editing.id}`, {
+      const payload: Record<string, unknown> = {
         name: editing.name,
         description: editing.description,
         event_type: editing.event_type,
-      });
+      };
+      if (editing.event_type === 'shop') {
+        payload.shop_config = editing.shop_config || defaultShopConfig();
+      }
+      await api.patch(`/events/${editing.id}`, payload);
       setEditing(null);
       load();
     } catch (err) {
@@ -108,7 +171,14 @@ export default function EventsPage() {
             <option value="rest">Rest</option>
             <option value="generic">Generic</option>
             <option value="battle_hook">Battle Hook</option>
+            <option value="shop">Shop</option>
           </select>
+          {form.event_type === 'shop' && (
+            <ShopConfigEditor
+              config={form.shop_config}
+              onChange={(shop_config) => setForm({ ...form, shop_config })}
+            />
+          )}
           <div>
             <label className="label">Images (optional)</label>
             <input
@@ -162,7 +232,11 @@ export default function EventsPage() {
                   </div>
                 )}
                 <div className="mt-2 flex gap-1">
-                  <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => setEditing({ ...ev, images: ev.images || [] })}>Edit</button>
+                  <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => setEditing({
+                    ...ev,
+                    images: ev.images || [],
+                    shop_config: ev.shop_config || defaultShopConfig(),
+                  })}>Edit</button>
                   {!ev.is_generic && (
                     <button className="btn-danger px-2 py-0.5 text-xs" onClick={() => setDeleteId(ev.id)}>Delete</button>
                   )}
@@ -182,11 +256,21 @@ export default function EventsPage() {
             </h3>
             <input className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             <textarea className="input min-h-24" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
-            <select className="input" value={editing.event_type} onChange={(e) => setEditing({ ...editing, event_type: e.target.value })}>
-              {['story', 'puzzle', 'rest', 'generic', 'battle_hook'].map((t) => (
+            <select className="input" value={editing.event_type} onChange={(e) => setEditing({
+              ...editing,
+              event_type: e.target.value,
+              shop_config: e.target.value === 'shop' ? (editing.shop_config || defaultShopConfig()) : editing.shop_config,
+            })}>
+              {['story', 'puzzle', 'rest', 'generic', 'battle_hook', 'shop'].map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
+            {editing.event_type === 'shop' && (
+              <ShopConfigEditor
+                config={editing.shop_config || defaultShopConfig()}
+                onChange={(shop_config) => setEditing({ ...editing, shop_config })}
+              />
+            )}
             {editing.images?.length > 0 ? (
               <div>
                 <label className="label">Attached images</label>

@@ -43,6 +43,7 @@ class Character(Base):
     xp: Mapped[int] = mapped_column(Integer, default=0)
     stat_points_free: Mapped[int] = mapped_column(Integer, default=0)
     level_stat_allocations: Mapped[dict] = mapped_column(JSON, default=dict)
+    wallet_copper: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="character")
@@ -104,6 +105,7 @@ class EventTemplate(Base):
     images: Mapped[list] = mapped_column(JSON, default=list)
     is_generic: Mapped[bool] = mapped_column(Boolean, default=False)
     branch_hints: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    shop_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     nodes: Mapped[list["CampaignEventNode"]] = relationship(back_populates="event_template")
@@ -143,6 +145,7 @@ class ItemTemplate(Base):
     stats: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str] = mapped_column(Text, default="")
     secret_template_id: Mapped[int | None] = mapped_column(ForeignKey("secret_templates.id"), nullable=True)
+    base_price: Mapped[int] = mapped_column(Integer, default=0)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -298,6 +301,19 @@ class BattlePreset(Base):
     master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(128))
     enemies: Mapped[list] = mapped_column(JSON, default=list)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class CurrencySettings(Base):
+    __tablename__ = "currency_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    tier1_name: Mapped[str] = mapped_column(String(64), default="Copper")
+    tier2_name: Mapped[str] = mapped_column(String(64), default="Silver")
+    tier3_name: Mapped[str] = mapped_column(String(64), default="Gold")
+    copper_per_silver: Mapped[int] = mapped_column(Integer, default=100)
+    silver_per_gold: Mapped[int] = mapped_column(Integer, default=10)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

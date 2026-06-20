@@ -63,6 +63,8 @@ export interface Character {
   stat_points_free?: number;
   level_stat_allocations?: Record<string, number>;
   stat_raise_costs?: Record<string, number>;
+  wallet_copper?: number;
+  wallet_display?: string;
   effective_stats?: Record<string, number>;
   attack_bonus?: number;
   username?: string;
@@ -89,6 +91,8 @@ export interface Character {
     equippable: boolean;
     bag_only: boolean;
     equip_slots: string[];
+    base_price?: number;
+    price_display?: string | null;
     secret_template_id?: number | null;
     secret_state?: { examined: boolean; revealed: boolean };
     revealed_description?: string;

@@ -90,7 +90,6 @@ def apply_schema_patches(engine: Engine) -> None:
         "level_stat_allocations TEXT DEFAULT '{}'",
     )
     _patch_stat_change_log_nullable_master(engine)
-    _reconcile_all_character_stat_points(engine)
     _add_column_if_missing(
         engine,
         "temporary_effects",
@@ -121,6 +120,39 @@ def apply_schema_patches(engine: Engine) -> None:
         "secret_state",
         "secret_state TEXT DEFAULT '{}'",
     )
+    _add_column_if_missing(engine, "characters", "wallet_copper", "wallet_copper INTEGER DEFAULT 0")
+    _add_column_if_missing(engine, "item_templates", "base_price", "base_price INTEGER DEFAULT 0")
+    _add_column_if_missing(
+        engine,
+        "event_templates",
+        "shop_config",
+        "shop_config TEXT",
+    )
+    _ensure_currency_settings_table(engine)
+    _reconcile_all_character_stat_points(engine)
+
+
+def _ensure_currency_settings_table(engine: Engine) -> None:
+    insp = inspect(engine)
+    if "currency_settings" in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE currency_settings (
+                    id INTEGER PRIMARY KEY,
+                    master_id INTEGER REFERENCES users(id),
+                    tier1_name VARCHAR(64) DEFAULT 'Copper',
+                    tier2_name VARCHAR(64) DEFAULT 'Silver',
+                    tier3_name VARCHAR(64) DEFAULT 'Gold',
+                    copper_per_silver INTEGER DEFAULT 100,
+                    silver_per_gold INTEGER DEFAULT 10,
+                    is_system BOOLEAN DEFAULT 0
+                )
+                """
+            )
+        )
 
 
 def _reconcile_all_character_stat_points(engine: Engine) -> None:

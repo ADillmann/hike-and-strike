@@ -396,7 +396,7 @@ function AdvanceRewardBuilder({
   effects: EffectTemplate[];
   onChange: (payload: RewardsPayload) => void;
 }) {
-  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp' | 'effect'>('item');
+  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp' | 'currency' | 'effect'>('item');
   const [charId, setCharId] = useState(party[0]?.id || 0);
   const [itemId, setItemId] = useState(items[0]?.id || 0);
   const [randomWholeParty, setRandomWholeParty] = useState(true);
@@ -408,6 +408,10 @@ function AdvanceRewardBuilder({
   const [xpWholeParty, setXpWholeParty] = useState(true);
   const [xpCharId, setXpCharId] = useState(party[0]?.id || 0);
   const [xpAmount, setXpAmount] = useState(100);
+  const [currencyWholeParty, setCurrencyWholeParty] = useState(true);
+  const [currencyCharId, setCurrencyCharId] = useState(party[0]?.id || 0);
+  const [currencyAmount, setCurrencyAmount] = useState(100);
+  const [currencyReduce, setCurrencyReduce] = useState(false);
   const [effectWholeParty, setEffectWholeParty] = useState(false);
   const [effectCharId, setEffectCharId] = useState(party[0]?.id || 0);
   const [effectTemplateId, setEffectTemplateId] = useState(effects[0]?.id || 0);
@@ -417,6 +421,7 @@ function AdvanceRewardBuilder({
       setCharId(party[0].id);
       setRandomCharId(party[0].id);
       setXpCharId(party[0].id);
+      setCurrencyCharId(party[0].id);
       setEffectCharId(party[0].id);
     }
     if (items[0]) setItemId(items[0].id);
@@ -468,6 +473,27 @@ function AdvanceRewardBuilder({
       }
       return;
     }
+    if (rewardType === 'currency' && currencyAmount > 0) {
+      const targets = currencyWholeParty ? party.map((p) => p.id) : [currencyCharId].filter(Boolean);
+      if (targets.length) {
+        if (currencyReduce) {
+          onChange({
+            punishments: {
+              wallet_reduction: targets.map((character_id) => ({ character_id, amount: currencyAmount })),
+            },
+          });
+        } else {
+          onChange({
+            rewards: {
+              wallet: targets.map((character_id) => ({ character_id, amount: currencyAmount })),
+            },
+          });
+        }
+      } else {
+        onChange({});
+      }
+      return;
+    }
     if (rewardType === 'effect' && effectTemplateId) {
       const targets = effectWholeParty ? party.map((p) => p.id) : [effectCharId].filter(Boolean);
       if (targets.length) {
@@ -498,6 +524,10 @@ function AdvanceRewardBuilder({
     xpWholeParty,
     xpCharId,
     xpAmount,
+    currencyWholeParty,
+    currencyCharId,
+    currencyAmount,
+    currencyReduce,
     effectWholeParty,
     effectCharId,
     effectTemplateId,
@@ -512,6 +542,7 @@ function AdvanceRewardBuilder({
         <option value="random">Random tier loot</option>
         <option value="hp">HP change</option>
         <option value="xp">Grant XP</option>
+        <option value="currency">Grant / reduce currency</option>
         <option value="effect">Apply effect</option>
       </select>
 
@@ -620,6 +651,28 @@ function AdvanceRewardBuilder({
             <label className="label">XP amount</label>
             <input className="input" type="number" min={1} value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} />
           </div>
+        </>
+      )}
+
+      {rewardType === 'currency' && (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={currencyWholeParty} onChange={(e) => setCurrencyWholeParty(e.target.checked)} />
+            Whole party (same amount each)
+          </label>
+          {!currencyWholeParty && (
+            <select className="input" value={currencyCharId} onChange={(e) => setCurrencyCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <div>
+            <label className="label">Amount (copper)</label>
+            <input className="input" type="number" min={1} value={currencyAmount} onChange={(e) => setCurrencyAmount(+e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={currencyReduce} onChange={(e) => setCurrencyReduce(e.target.checked)} />
+            Reduce instead of grant
+          </label>
         </>
       )}
 

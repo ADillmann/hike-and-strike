@@ -17,6 +17,7 @@ import EnemiesPage from './pages/master/Enemies';
 import SkillsPageMaster from './pages/master/Skills';
 import EffectsPageMaster from './pages/master/Effects';
 import SecretsPageMaster from './pages/master/Secrets';
+import CurrencyPage from './pages/master/Currency';
 
 function Protected({ children, role }: { children: React.ReactNode; role?: 'master' | 'player' }) {
   const { user, loading } = useAuth();
@@ -39,6 +40,7 @@ export default function App() {
       <Route path="/organizer/skills" element={<Protected role="master"><SkillsPageMaster /></Protected>} />
       <Route path="/organizer/effects" element={<Protected role="master"><EffectsPageMaster /></Protected>} />
       <Route path="/organizer/secrets" element={<Protected role="master"><SecretsPageMaster /></Protected>} />
+      <Route path="/organizer/currency" element={<Protected role="master"><CurrencyPage /></Protected>} />
       <Route path="/organizer/campaigns" element={<Protected role="master"><CampaignsPage /></Protected>} />
       <Route path="/organizer/campaigns/:id/control" element={<Protected role="master"><CampaignControlPage /></Protected>} />
       <Route path="/character/create" element={<Protected role="player"><CharacterCreatePage /></Protected>} />

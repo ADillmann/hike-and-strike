@@ -41,7 +41,7 @@ interface InvItem {
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
 
-type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'remove';
+type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'currency' | 'remove';
 
 interface PendingRewardConfirm {
   action: RewardConfirmAction;
@@ -65,7 +65,7 @@ export function RewardsPanel({
   onApplied?: () => void;
   compact?: boolean;
 }) {
-  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'remove'>('item');
+  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'currency' | 'remove'>('item');
   const [rewardCharId, setRewardCharId] = useState(0);
   const [rewardItemId, setRewardItemId] = useState(0);
   const [wholeParty, setWholeParty] = useState(false);
@@ -80,6 +80,10 @@ export function RewardsPanel({
   const [xpWholeParty, setXpWholeParty] = useState(true);
   const [xpCharId, setXpCharId] = useState(0);
   const [xpAmount, setXpAmount] = useState(100);
+  const [currencyWholeParty, setCurrencyWholeParty] = useState(true);
+  const [currencyCharId, setCurrencyCharId] = useState(0);
+  const [currencyAmount, setCurrencyAmount] = useState(100);
+  const [currencyReduce, setCurrencyReduce] = useState(false);
   const [effectWholeParty, setEffectWholeParty] = useState(false);
   const [effectCharId, setEffectCharId] = useState(0);
   const [effectTemplateId, setEffectTemplateId] = useState(0);
@@ -94,6 +98,7 @@ export function RewardsPanel({
       setBuffCharId(party[0].id);
       setHpCharId(party[0].id);
       setXpCharId(party[0].id);
+      setCurrencyCharId(party[0].id);
       setRemoveCharId(party[0].id);
       setEffectCharId(party[0].id);
     }
@@ -173,6 +178,24 @@ export function RewardsPanel({
         xp: targets.map((character_id) => ({ character_id, amount: xpAmount })),
       },
     });
+  };
+
+  const applyCurrency = async () => {
+    if (currencyAmount <= 0) return;
+    const targets = currencyWholeParty ? party.map((p) => p.id) : [currencyCharId];
+    if (currencyReduce) {
+      await apply({
+        punishments: {
+          wallet_reduction: targets.map((character_id) => ({ character_id, amount: currencyAmount })),
+        },
+      });
+    } else {
+      await apply({
+        rewards: {
+          wallet: targets.map((character_id) => ({ character_id, amount: currencyAmount })),
+        },
+      });
+    }
   };
 
   const grantEffect = async () => {
@@ -306,6 +329,27 @@ export function RewardsPanel({
     });
   };
 
+  const requestCurrencyConfirm = () => {
+    if (currencyAmount <= 0) return;
+    const actionLabel = currencyReduce ? 'Reduce currency' : 'Grant currency';
+    if (currencyWholeParty) {
+      setPendingConfirm({
+        action: 'currency',
+        title: actionLabel,
+        message: `${currencyReduce ? 'Remove' : 'Grant'} ${currencyAmount} copper ${currencyReduce ? 'from' : 'to'} each party member (${party.length} characters)?`,
+        confirmLabel: currencyReduce ? 'Reduce' : 'Grant',
+      });
+      return;
+    }
+    const character = party.find((p) => p.id === currencyCharId);
+    setPendingConfirm({
+      action: 'currency',
+      title: actionLabel,
+      message: `${currencyReduce ? 'Remove' : 'Grant'} ${currencyAmount} copper ${currencyReduce ? 'from' : 'to'} ${character?.name ?? 'character'}?`,
+      confirmLabel: currencyReduce ? 'Reduce' : 'Grant',
+    });
+  };
+
   const requestRemoveConfirm = () => {
     if (!removeInvId) return;
     const character = party.find((p) => p.id === removeCharId);
@@ -341,6 +385,9 @@ export function RewardsPanel({
       case 'xp':
         await grantXp();
         break;
+      case 'currency':
+        await applyCurrency();
+        break;
       case 'effect':
         await grantEffect();
         break;
@@ -358,6 +405,7 @@ export function RewardsPanel({
     { id: 'effect' as const, label: 'Effect' },
     { id: 'hp' as const, label: 'HP' },
     { id: 'xp' as const, label: 'XP' },
+    { id: 'currency' as const, label: 'Currency' },
     { id: 'remove' as const, label: 'Remove' },
   ];
 
@@ -519,6 +567,35 @@ export function RewardsPanel({
           </div>
           <button className="btn-secondary w-full" onClick={requestXpConfirm} disabled={xpAmount <= 0}>
             Grant XP
+          </button>
+        </div>
+      )}
+
+      {tab === 'currency' && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={currencyWholeParty} onChange={(e) => setCurrencyWholeParty(e.target.checked)} />
+            Whole party (same amount each)
+          </label>
+          {!currencyWholeParty && (
+            <select className="input" value={currencyCharId} onChange={(e) => setCurrencyCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <div>
+            <label className="label">Amount (copper)</label>
+            <input className="input" type="number" min={1} value={currencyAmount} onChange={(e) => setCurrencyAmount(+e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={currencyReduce} onChange={(e) => setCurrencyReduce(e.target.checked)} />
+            Reduce instead of grant
+          </label>
+          <button
+            className={currencyReduce ? 'btn-danger w-full' : 'btn-secondary w-full'}
+            onClick={requestCurrencyConfirm}
+            disabled={currencyAmount <= 0}
+          >
+            {currencyReduce ? 'Reduce Currency' : 'Grant Currency'}
           </button>
         </div>
       )}

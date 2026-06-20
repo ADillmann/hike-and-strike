@@ -3,25 +3,26 @@ from sqlalchemy.orm import Session
 from app.game.constants import LEGACY_EQUIP_SLOTS
 from app.models import BattlePreset, EffectTemplate, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, SecretTemplate, Skill, SkillTemplate
 from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
+from app.services.currency import get_system_currency_settings
 
 BASE_ITEMS = [
-    ("Iron Sword", "weapon", 1, {"damage": 4}, "A reliable blade."),
-    ("Steel Longsword", "weapon", 2, {"damage": 6, "two_handed": True}, "A heavy two-handed sword."),
-    ("Leather Cap", "head", 1, {"armor_bonus": 1}, "Simple head protection."),
-    ("Iron Helm", "head", 2, {"armor_bonus": 2}, "A sturdy helmet."),
-    ("Wooden Shield", "shield", 1, {"armor_bonus": 1}, "Basic shield for the off hand."),
-    ("Leather Armor", "armor", 1, {"armor_bonus": 2}, "Basic chest protection."),
-    ("Chain Mail", "armor", 2, {"armor_bonus": 4}, "Interlocking metal rings."),
-    ("Leather Gloves", "gloves", 1, {"armor_bonus": 1}, "Protects the hands."),
-    ("Leather Pants", "legs", 1, {"armor_bonus": 1}, "Sturdy leg wear."),
-    ("Travel Boots", "shoes", 1, {"armor_bonus": 1}, "Comfortable boots."),
-    ("Copper Ring", "ring", 1, {"initiative": 1}, "A simple band."),
-    ("Silver Ring", "ring", 2, {"charisma": 1}, "A polished silver ring."),
-    ("Iron Amulet", "necklace", 1, {"durability": 1}, "A plain amulet."),
-    ("Minor Heal Potion", "consumable", 1, {"heal": 5}, "Restores a little health."),
-    ("Torch", "consumable", 1, {}, "Lights the way."),
-    ("Rope", "key", 1, {}, "Fifty feet of sturdy rope."),
-    ("Arcane Missile Scroll", "spell", 2, {"damage": 5}, "A one-use spell."),
+    ("Iron Sword", "weapon", 1, {"damage": 4}, "A reliable blade.", 120),
+    ("Steel Longsword", "weapon", 2, {"damage": 6, "two_handed": True}, "A heavy two-handed sword.", 350),
+    ("Leather Cap", "head", 1, {"armor_bonus": 1}, "Simple head protection.", 80),
+    ("Iron Helm", "head", 2, {"armor_bonus": 2}, "A sturdy helmet.", 200),
+    ("Wooden Shield", "shield", 1, {"armor_bonus": 1}, "Basic shield for the off hand.", 100),
+    ("Leather Armor", "armor", 1, {"armor_bonus": 2}, "Basic chest protection.", 150),
+    ("Chain Mail", "armor", 2, {"armor_bonus": 4}, "Interlocking metal rings.", 500),
+    ("Leather Gloves", "gloves", 1, {"armor_bonus": 1}, "Protects the hands.", 60),
+    ("Leather Pants", "legs", 1, {"armor_bonus": 1}, "Sturdy leg wear.", 80),
+    ("Travel Boots", "shoes", 1, {"armor_bonus": 1}, "Comfortable boots.", 70),
+    ("Copper Ring", "ring", 1, {"initiative": 1}, "A simple band.", 50),
+    ("Silver Ring", "ring", 2, {"charisma": 1}, "A polished silver ring.", 250),
+    ("Iron Amulet", "necklace", 1, {"durability": 1}, "A plain amulet.", 90),
+    ("Minor Heal Potion", "consumable", 1, {"heal": 5}, "Restores a little health.", 25),
+    ("Torch", "consumable", 1, {}, "Lights the way.", 10),
+    ("Rope", "key", 1, {}, "Fifty feet of sturdy rope.", 15),
+    ("Arcane Missile Scroll", "spell", 2, {"damage": 5}, "A one-use spell.", 300),
 ]
 
 BASE_ENEMIES = [
@@ -86,10 +87,15 @@ def migrate_legacy_equipment(db: Session) -> None:
 
 
 def _ensure_system_items(db: Session) -> None:
-    existing = {row.name for row in db.query(ItemTemplate).filter(ItemTemplate.is_system == True).all()}  # noqa: E712
-    for name, itype, tier, stats, desc in BASE_ITEMS:
+    existing = {row.name: row for row in db.query(ItemTemplate).filter(ItemTemplate.is_system == True).all()}  # noqa: E712
+    for name, itype, tier, stats, desc, base_price in BASE_ITEMS:
         if name not in existing:
-            db.add(ItemTemplate(name=name, item_type=itype, tier=tier, stats=stats, description=desc, is_system=True))
+            db.add(ItemTemplate(
+                name=name, item_type=itype, tier=tier, stats=stats, description=desc,
+                base_price=base_price, is_system=True,
+            ))
+        elif (existing[name].base_price or 0) <= 0:
+            existing[name].base_price = base_price
 
 
 def _ensure_system_enemies(db: Session) -> None:
@@ -266,18 +272,34 @@ def migrate_skill_effect_types(db: Session) -> None:
             row.effect_params = params
 
 
+def _ensure_currency_settings(db: Session) -> None:
+    get_system_currency_settings(db)
+
+
+def _migrate_shop_event(db: Session) -> None:
+    shop = db.query(EventTemplate).filter(EventTemplate.name == "Shop", EventTemplate.is_generic == True).first()  # noqa: E712
+    if shop and shop.event_type != "shop":
+        shop.event_type = "shop"
+        shop.shop_config = {"allowed_tiers": [1, 2, 3], "buy_modifier_percent": 10}
+
+
 def seed_data(db: Session) -> None:
     if db.query(EventTemplate).filter(EventTemplate.is_generic == True).count() == 0:  # noqa: E712
         generic_events = [
             ("Bonfire", "A warm campfire. The party can rest and recover.", "rest"),
             ("House", "A safe shelter for the night.", "rest"),
-            ("Shop", "A merchant offers goods for sale.", "generic"),
+            ("Shop", "A merchant offers goods for sale.", "shop"),
             ("City Square", "A bustling town center.", "generic"),
             ("Prison Cell", "Cold stone walls and iron bars.", "story"),
         ]
         for name, desc, etype in generic_events:
-            db.add(EventTemplate(name=name, description=desc, event_type=etype, is_generic=True, master_id=None))
+            shop_config = {"allowed_tiers": [1, 2, 3], "buy_modifier_percent": 10} if etype == "shop" else None
+            db.add(EventTemplate(
+                name=name, description=desc, event_type=etype, is_generic=True,
+                master_id=None, shop_config=shop_config,
+            ))
 
+    _ensure_currency_settings(db)
     _ensure_system_items(db)
     _ensure_system_enemies(db)
     _ensure_system_presets(db)
@@ -285,6 +307,7 @@ def seed_data(db: Session) -> None:
     _ensure_system_effects(db)
     _ensure_system_secrets(db)
     _ensure_secret_items(db)
+    _migrate_shop_event(db)
 
     migrate_legacy_equipment(db)
     migrate_skill_effect_types(db)

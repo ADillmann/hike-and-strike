@@ -43,17 +43,20 @@ def campaign_state_payload(db: Session, campaign: Campaign) -> dict[str, Any]:
         node = db.get(CampaignEventNode, campaign.current_node_id)
         if node:
             template = db.get(EventTemplate, node.event_template_id)
+            event_data: dict[str, Any] = {
+                "id": template.id if template else None,
+                "name": template.name if template else None,
+                "description": template.description if template else None,
+                "event_type": template.event_type if template else None,
+                "images": template.images if template else [],
+            }
+            if template and template.event_type == "shop":
+                event_data["shop_config"] = template.shop_config or {}
             current = {
                 "node_id": node.id,
                 "sort_order": node.sort_order,
                 "label": node.label,
-                "event": {
-                    "id": template.id if template else None,
-                    "name": template.name if template else None,
-                    "description": template.description if template else None,
-                    "event_type": template.event_type if template else None,
-                    "images": template.images if template else [],
-                },
+                "event": event_data,
             }
     return {
         "campaign_id": campaign.id,
@@ -99,6 +102,13 @@ async def broadcast_character_updated(db: Session, character_id: int, campaign_i
     else:
         for cid in ws_manager.campaign_ids_for_character(character_id):
             await ws_manager.broadcast(cid, payload)
+
+
+def grant_wallet(db: Session, character_id: int, amount: int) -> None:
+    character = db.get(Character, character_id)
+    if not character:
+        return
+    character.wallet_copper = max(0, (character.wallet_copper or 0) + amount)
 
 
 def grant_item(db: Session, character_id: int, item_template_id: int, equipped_slot: str | None = None) -> InventoryItem:
@@ -164,6 +174,14 @@ def apply_rewards_and_punishments(
             character = db.get(Character, char_id)
             if character:
                 grant_xp(db, character, int(amount), master_id, campaign.id)
+
+    if rewards and rewards.get("wallet"):
+        for entry in rewards.get("wallet", []):
+            char_id = entry.get("character_id")
+            amount = entry.get("amount", 0)
+            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+                continue
+            grant_wallet(db, char_id, int(amount))
 
     if rewards:
         for entry in rewards.get("items", []):
@@ -232,6 +250,12 @@ def apply_rewards_and_punishments(
                     inv.quantity -= 1
                 else:
                     db.delete(inv)
+        for entry in punishments.get("wallet_reduction", []):
+            char_id = entry.get("character_id")
+            amount = entry.get("amount", 0)
+            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+                continue
+            grant_wallet(db, char_id, -int(amount))
 
 
 def apply_rest_to_party(db: Session, campaign: Campaign) -> None:

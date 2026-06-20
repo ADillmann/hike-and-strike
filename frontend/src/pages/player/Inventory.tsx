@@ -122,6 +122,7 @@ function ItemCard({
           </div>
           <div className="text-xs text-stone-500">
             {item.item_type} · Tier {item.tier}
+            {item.price_display && <span> · {item.price_display}</span>}
             {item.equipped_slot && (
               <>
                 {' · '}
@@ -413,6 +414,14 @@ export default function InventoryPage() {
       {hasParty && (
         <p className="mb-4 text-sm text-stone-500">Group: {party.filter((p) => !p.is_self).map((p) => p.name).join(', ') || 'just you'}</p>
       )}
+
+      <section className="card mb-4">
+        <h2 className="mb-1 font-semibold text-dungeon-300">Wallet</h2>
+        <p className="text-lg text-dungeon-200">{character.wallet_display || '0 copper'}</p>
+        {character.wallet_copper != null && (
+          <p className="text-xs text-stone-500">{character.wallet_copper} copper total</p>
+        )}
+      </section>
 
       <section className="card mb-4">
         <h2 className="mb-3 font-semibold text-dungeon-300">Equipment</h2>

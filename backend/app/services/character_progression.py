@@ -62,6 +62,7 @@ def progression_fields(character: Character) -> dict[str, Any]:
         "stat_points_free": character.stat_points_free,
         "level_stat_allocations": dict(character.level_stat_allocations or {}),
         "stat_raise_costs": stat_raise_costs(character.stats or {}),
+        "wallet_copper": character.wallet_copper or 0,
     }
 
 

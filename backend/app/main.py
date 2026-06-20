@@ -13,6 +13,7 @@ from app.routers import (
     campaign_runtime,
     campaigns,
     characters,
+    currency,
     enemies,
     events,
     effects,
@@ -63,6 +64,7 @@ api.include_router(items.router)
 api.include_router(skills.router)
 api.include_router(effects.router)
 api.include_router(secrets.router)
+api.include_router(currency.router)
 api.include_router(campaigns.router)
 api.include_router(campaign_runtime.router)
 api.include_router(player_campaign.router)

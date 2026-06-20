@@ -48,6 +48,7 @@ from app.services.character_progression import (
 from app.services.skill_usage import use_skill_outside_battle
 from app.services.skill_effects import skill_battle_meta, skill_from_template
 from app.services.campaign_engine import broadcast_character_updated, recalculate_character_hp
+from app.services.currency import format_price, format_wallet, get_system_currency_settings
 from app.services.secret_engine import examine_secret_item, secret_inventory_payload, solve_secret_item
 from app.services.character_stats import (
     effective_stats,
@@ -82,7 +83,7 @@ def _add_skill_templates(db: Session, character_id: int, template_ids: list[int]
         db.add(skill_from_template(character_id, template))
 
 
-def _serialize_inventory_item(inv: InventoryItem) -> dict[str, Any]:
+def _serialize_inventory_item(inv: InventoryItem, db: Session) -> dict[str, Any]:
     template = inv.item_template
     secret = template.secret_template if template else None
     is_secret = bool(template and template.item_type == "secret")
@@ -91,6 +92,8 @@ def _serialize_inventory_item(inv: InventoryItem) -> dict[str, Any]:
     description = template.description if template else ""
     if is_secret and not revealed:
         description = "???"
+    settings = get_system_currency_settings(db)
+    base_price = (template.base_price or 0) if template else 0
     entry: dict[str, Any] = {
         "id": inv.id,
         "item_template_id": inv.item_template_id,
@@ -104,6 +107,8 @@ def _serialize_inventory_item(inv: InventoryItem) -> dict[str, Any]:
         "equippable": is_equippable(template) if template else False,
         "bag_only": is_bag_only_item(template) if template else True,
         "equip_slots": equip_slots_for_item(template) if template else [],
+        "base_price": base_price,
+        "price_display": format_price(base_price, settings) if base_price > 0 else None,
     }
     if is_secret:
         entry.update(secret_inventory_payload(inv, secret))
@@ -125,6 +130,8 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
     )
     eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
     prog = progression_fields(character)
+    settings = get_system_currency_settings(db)
+    wallet_copper = character.wallet_copper or 0
     return CharacterOut(
         id=character.id,
         user_id=character.user_id,
@@ -135,6 +142,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         max_hp=character.max_hp,
         current_hp=character.current_hp,
         **prog,
+        wallet_display=format_wallet(wallet_copper, settings),
         effective_stats=eff,
         attack_bonus=weapon_attack_bonus(character.inventory_items, eff),
         username=character.user.username if character.user else None,
@@ -149,7 +157,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
             }
             for s in character.skills
         ],
-        inventory=[_serialize_inventory_item(i) for i in character.inventory_items],
+        inventory=[_serialize_inventory_item(i, db) for i in character.inventory_items],
         temporary_effects=[
             {
                 "id": e.id,

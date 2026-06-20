@@ -134,6 +134,8 @@ class CharacterOut(BaseModel):
     stat_points_free: int = 0
     level_stat_allocations: dict[str, int] = Field(default_factory=dict)
     stat_raise_costs: dict[str, int] = Field(default_factory=dict)
+    wallet_copper: int = 0
+    wallet_display: str = ""
     effective_stats: dict[str, int] | None = None
     attack_bonus: int | None = None
     username: str | None = None
@@ -199,12 +201,14 @@ class EventTemplateCreate(BaseModel):
     images: list[str] = Field(default_factory=list)
     is_generic: bool = False
     branch_hints: dict | None = None
+    shop_config: dict | None = None
 
 
 class EventTemplateUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     event_type: str | None = None
+    shop_config: dict | None = None
 
 
 class EventTemplateOut(BaseModel):
@@ -215,6 +219,7 @@ class EventTemplateOut(BaseModel):
     images: list[str]
     is_generic: bool
     branch_hints: dict | None = None
+    shop_config: dict | None = None
 
     class Config:
         from_attributes = True
@@ -264,6 +269,34 @@ class SolveSecretItemRequest(BaseModel):
     guess: str
 
 
+class CurrencySettingsOut(BaseModel):
+    tier1_name: str
+    tier2_name: str
+    tier3_name: str
+    copper_per_silver: int
+    silver_per_gold: int
+    is_system: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class CurrencySettingsUpdate(BaseModel):
+    tier1_name: str | None = None
+    tier2_name: str | None = None
+    tier3_name: str | None = None
+    copper_per_silver: int | None = None
+    silver_per_gold: int | None = None
+
+
+class ShopBuyRequest(BaseModel):
+    item_template_id: int
+
+
+class ShopSellRequest(BaseModel):
+    inventory_item_id: int
+
+
 class SecretInteractionOut(BaseModel):
     success: bool
     message: str
@@ -287,6 +320,7 @@ class ItemTemplateCreate(BaseModel):
     stats: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
     secret_template_id: int | None = None
+    base_price: int = 0
 
 
 class ItemTemplateOut(BaseModel):
@@ -297,6 +331,7 @@ class ItemTemplateOut(BaseModel):
     stats: dict[str, Any]
     description: str
     secret_template_id: int | None = None
+    base_price: int = 0
     is_system: bool
 
     class Config:
