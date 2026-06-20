@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
 import { Layout, StatEditor } from '../../components/Layout';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -17,10 +17,18 @@ interface CampaignState {
   party: { id: number; name: string; username: string; stats: Record<string, number>; max_hp: number; current_hp: number }[];
 }
 
-interface Node { id: number; sort_order: number; event_name: string; event_type: string }
+interface Node {
+  id: number;
+  sort_order: number;
+  event_name: string;
+  event_type: string;
+  label?: string | null;
+}
+interface EventTemplate { id: number; name: string; event_type: string }
 interface Item { id: number; name: string; tier: number }
 interface HistoryEntry {
   id: number;
+  node_id?: number | null;
   event_name: string;
   outcome: string;
   master_notes: string;
@@ -29,12 +37,36 @@ interface HistoryEntry {
   timestamp: string;
 }
 
+function formatNodeOption(n: Node, index: number): string {
+  return `#${index + 1} ${n.event_name} (${n.event_type})`;
+}
+
+function buildLatestOutcomes(history: HistoryEntry[]): Map<number, { outcome: string; master_notes: string | null }> {
+  const map = new Map<number, { outcome: string; master_notes: string | null }>();
+  for (const entry of history) {
+    if (entry.node_id != null && !map.has(entry.node_id)) {
+      map.set(entry.node_id, { outcome: entry.outcome, master_notes: entry.master_notes || null });
+    }
+  }
+  return map;
+}
+
+function outcomeBadgeClass(outcome: string): string {
+  switch (outcome) {
+    case 'success': return 'bg-green-900/50 text-green-400';
+    case 'failure': return 'bg-red-900/50 text-red-400';
+    case 'partial': return 'bg-yellow-900/50 text-yellow-400';
+    default: return 'bg-dungeon-700 text-stone-400';
+  }
+}
+
 export default function CampaignControlPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const campaignId = Number(id);
   const [state, setState] = useState<CampaignState | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [events, setEvents] = useState<EventTemplate[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [effects, setEffects] = useState<EffectTemplate[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -48,24 +80,39 @@ export default function CampaignControlPage() {
   const [editChar, setEditChar] = useState<Character | null>(null);
   const [editStats, setEditStats] = useState<Record<string, number>>({});
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
+  const [addEventTemplateId, setAddEventTemplateId] = useState(0);
+  const [addEventLabel, setAddEventLabel] = useState('');
+  const [insertPosition, setInsertPosition] = useState(1);
+  const [addEventError, setAddEventError] = useState('');
+
+  const loadCampaignNodes = useCallback(async (selectNodeId?: number) => {
+    const campaigns = await api.get<{ id: number; nodes: Node[] }[]>('/campaigns');
+    const c = campaigns.find((x) => x.id === campaignId);
+    if (!c) return;
+    const sorted = [...c.nodes].sort((a, b) => a.sort_order - b.sort_order);
+    setNodes(sorted);
+    if (selectNodeId) {
+      setNextNodeId(selectNodeId);
+    } else {
+      setNextNodeId((prev) => prev || sorted[0]?.id || 0);
+    }
+  }, [campaignId]);
 
   const load = useCallback(() => {
     if (!campaignId) return;
     api.get<CampaignState>(`/campaigns/${campaignId}/state`).then(setState);
-    api.get<{ id: number; nodes: Node[] }[]>('/campaigns').then((campaigns) => {
-      const c = campaigns.find((x) => x.id === campaignId);
-      if (c) {
-        setNodes(c.nodes);
-        if (!nextNodeId && c.nodes[0]) setNextNodeId(c.nodes[0].id);
-      }
-    });
+    loadCampaignNodes();
     api.get<HistoryEntry[]>(`/campaigns/${campaignId}/history`).then(setHistory);
     api.get<Item[]>('/items').then(setItems);
     api.get<EffectTemplate[]>('/effects').then(setEffects);
+    api.get<EventTemplate[]>('/events').then((evs) => {
+      setEvents(evs);
+      if (evs[0]) setAddEventTemplateId(evs[0].id);
+    });
     api.get<{ active: boolean; battle_id?: number }>(`/battles/campaigns/${campaignId}/active`).then((b) => {
       if (b.active && b.battle_id) setActiveBattleId(b.battle_id);
     });
-  }, [campaignId, nextNodeId]);
+  }, [campaignId, loadCampaignNodes]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -114,6 +161,29 @@ export default function CampaignControlPage() {
     load();
   };
 
+  useEffect(() => {
+    setInsertPosition(nodes.length + 1);
+  }, [nodes.length]);
+
+  const appendEvent = async () => {
+    if (!addEventTemplateId) return;
+    setAddEventError('');
+    try {
+      const res = await api.post<{ campaign: { nodes: Node[] }; new_node_id: number }>(`/campaigns/${campaignId}/nodes`, {
+        event_template_id: addEventTemplateId,
+        label: addEventLabel.trim() || null,
+        insert_position: insertPosition,
+      });
+      const sorted = [...res.campaign.nodes].sort((a, b) => a.sort_order - b.sort_order);
+      setNodes(sorted);
+      setNextNodeId(res.new_node_id);
+      setAddEventLabel('');
+      setInsertPosition(sorted.length + 1);
+    } catch (err) {
+      setAddEventError(err instanceof Error ? err.message : 'Could not add event');
+    }
+  };
+
   const openStatEdit = async (charId: number) => {
     const c = await api.get<Character>(`/characters/${charId}`);
     setEditChar(c);
@@ -135,6 +205,10 @@ export default function CampaignControlPage() {
   if (!state) return <Layout title="Campaign Control">Loading...</Layout>;
 
   const targetNode = nodes.find((n) => n.id === nextNodeId);
+  const currentNodeId = state.current_node?.node_id;
+  const sortedNodes = [...nodes].sort((a, b) => a.sort_order - b.sort_order);
+  const canModifyEvents = state.status === 'active' || state.status === 'paused';
+  const nodeOutcomes = buildLatestOutcomes(history);
   const advanceConfirmMessage = [
     `Record "${state.current_node?.event.name || 'current event'}" as ${outcome} and move the party to "${targetNode?.event_name || 'selected event'}"?`,
     applyRest && targetNode?.event_type === 'rest' ? 'Rest will be applied.' : null,
@@ -216,7 +290,9 @@ export default function CampaignControlPage() {
             <div>
               <label className="label">Next event</label>
               <select className="input" value={nextNodeId || state.current_node?.node_id || 0} onChange={(e) => setNextNodeId(+e.target.value)}>
-                {nodes.map((n) => <option key={n.id} value={n.id}>{n.event_name} ({n.event_type})</option>)}
+                {sortedNodes.map((n, i) => (
+                  <option key={n.id} value={n.id}>{formatNodeOption(n, i)}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -244,6 +320,105 @@ export default function CampaignControlPage() {
           </details>
           <button className="btn-primary mt-2" onClick={() => setAdvanceConfirmOpen(true)}>Go to Next Event</button>
         </section>
+
+        {canModifyEvents && (
+          <section className="card lg:col-span-2">
+            <h2 className="mb-2 font-semibold text-dungeon-300">Add Event to Campaign</h2>
+            <p className="mb-2 text-xs text-stone-500">
+              Append a template from your library so it appears in the next-event dropdown.
+              {' '}<Link to="/organizer/events" className="text-dungeon-400 hover:underline">Create a new event first</Link>
+            </p>
+            {addEventError && (
+              <p className="mb-2 rounded border border-red-800 bg-red-950/50 p-2 text-sm text-red-400">{addEventError}</p>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label className="label">Event template</label>
+                <select
+                  className="input"
+                  value={addEventTemplateId}
+                  onChange={(e) => setAddEventTemplateId(+e.target.value)}
+                >
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id}>{ev.name} ({ev.event_type})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Insert at position</label>
+                <select
+                  className="input"
+                  value={insertPosition}
+                  onChange={(e) => setInsertPosition(+e.target.value)}
+                >
+                  {sortedNodes.length === 0 ? (
+                    <option value={1}>Position 1 (first event)</option>
+                  ) : (
+                    <>
+                      <option value={1}>
+                        At beginning (before #1 {sortedNodes[0].event_name})
+                      </option>
+                      {sortedNodes.slice(1).map((n, i) => (
+                        <option key={n.id} value={i + 2}>
+                          Before #{i + 2} {n.event_name}
+                        </option>
+                      ))}
+                      <option value={sortedNodes.length + 1}>
+                        At end (after #{sortedNodes.length} {sortedNodes[sortedNodes.length - 1].event_name})
+                      </option>
+                    </>
+                  )}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">Label (optional)</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Side quest"
+                  value={addEventLabel}
+                  onChange={(e) => setAddEventLabel(e.target.value)}
+                />
+              </div>
+            </div>
+            <button
+              className="btn-secondary mt-2"
+              onClick={appendEvent}
+              disabled={!addEventTemplateId || events.length === 0}
+            >
+              Add to campaign
+            </button>
+
+            <div className="mt-4 border-t border-dungeon-700 pt-3">
+              <h3 className="mb-2 text-sm font-medium text-dungeon-300">Campaign roadmap</h3>
+              <ol className="space-y-1 text-sm">
+                {sortedNodes.map((n, i) => {
+                  const visited = nodeOutcomes.get(n.id);
+                  return (
+                  <li
+                    key={n.id}
+                    className={`rounded px-2 py-1 ${n.id === currentNodeId ? 'bg-dungeon-700 text-dungeon-200' : 'text-stone-400'}`}
+                  >
+                    {i + 1}. {n.event_name} ({n.event_type})
+                    {n.label && <span className="ml-1 text-stone-500">— {n.label}</span>}
+                    {visited && (
+                      <span
+                        className={`ml-2 rounded px-1.5 py-0.5 text-xs capitalize ${outcomeBadgeClass(visited.outcome)}`}
+                        title={visited.master_notes || undefined}
+                      >
+                        {visited.outcome}
+                      </span>
+                    )}
+                    {n.id === currentNodeId && <span className="ml-2 text-xs text-dungeon-400">current</span>}
+                    {n.id === nextNodeId && n.id !== currentNodeId && (
+                      <span className="ml-2 text-xs text-green-400">next</span>
+                    )}
+                  </li>
+                  );
+                })}
+              </ol>
+            </div>
+          </section>
+        )}
 
         <section className="card lg:col-span-3">
           <h2 className="mb-2 font-semibold text-dungeon-300">Event History</h2>

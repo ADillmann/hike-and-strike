@@ -344,6 +344,12 @@ class CampaignNodeCreate(BaseModel):
     label: str | None = None
 
 
+class AppendCampaignNodeRequest(BaseModel):
+    event_template_id: int
+    label: str | None = None
+    insert_position: int | None = None
+
+
 class CampaignCreate(BaseModel):
     name: str
     group_id: int
@@ -360,6 +366,11 @@ class CampaignOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AppendCampaignNodeResponse(BaseModel):
+    campaign: CampaignOut
+    new_node_id: int
 
 
 class AdvanceCampaignRequest(BaseModel):

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.database import get_db
 from app.models import Campaign, CampaignEventNode, EventTemplate, Group, User
-from app.schemas import CampaignCreate, CampaignNodeCreate, CampaignOut
+from app.schemas import AppendCampaignNodeRequest, AppendCampaignNodeResponse, CampaignCreate, CampaignNodeCreate, CampaignOut
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -100,6 +100,64 @@ def set_nodes(
     db.commit()
     campaign = db.query(Campaign).options(joinedload(Campaign.nodes)).filter(Campaign.id == campaign_id).first()
     return _serialize_campaign(db, campaign)
+
+
+@router.post("/{campaign_id}/nodes", response_model=AppendCampaignNodeResponse)
+def append_node(
+    campaign_id: int,
+    payload: AppendCampaignNodeRequest,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AppendCampaignNodeResponse:
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.status not in ("active", "paused"):
+        raise HTTPException(status_code=400, detail="Can only append nodes to active or paused campaigns")
+    template = db.get(EventTemplate, payload.event_template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Event template not found")
+
+    existing = (
+        db.query(CampaignEventNode)
+        .filter(CampaignEventNode.campaign_id == campaign_id)
+        .order_by(CampaignEventNode.sort_order)
+        .all()
+    )
+    max_pos = len(existing) + 1
+    insert_pos = payload.insert_position if payload.insert_position is not None else max_pos
+    if insert_pos < 1 or insert_pos > max_pos:
+        raise HTTPException(status_code=400, detail=f"insert_position must be between 1 and {max_pos}")
+
+    if insert_pos >= max_pos:
+        max_order = existing[-1].sort_order if existing else -1
+        sort_order = max_order + 1
+    else:
+        sort_order = existing[insert_pos - 1].sort_order
+        for node in existing:
+            if node.sort_order >= sort_order:
+                node.sort_order += 1
+
+    new_node = CampaignEventNode(
+        campaign_id=campaign_id,
+        event_template_id=payload.event_template_id,
+        sort_order=sort_order,
+        label=payload.label,
+    )
+    db.add(new_node)
+    db.flush()
+    new_node_id = new_node.id
+    db.commit()
+    campaign = (
+        db.query(Campaign)
+        .options(joinedload(Campaign.nodes))
+        .filter(Campaign.id == campaign_id)
+        .first()
+    )
+    return AppendCampaignNodeResponse(
+        campaign=_serialize_campaign(db, campaign),
+        new_node_id=new_node_id,
+    )
 
 
 @router.post("/{campaign_id}/start")
