@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
 import { Layout, StatEditor } from '../../components/Layout';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
-import { RewardsPanel, RewardsPayload } from '../../components/RewardsPanel';
+import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 
 interface CampaignState {
@@ -36,6 +36,7 @@ export default function CampaignControlPage() {
   const [state, setState] = useState<CampaignState | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [effects, setEffects] = useState<EffectTemplate[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [nextNodeId, setNextNodeId] = useState(0);
   const [outcome, setOutcome] = useState('success');
@@ -60,6 +61,7 @@ export default function CampaignControlPage() {
     });
     api.get<HistoryEntry[]>(`/campaigns/${campaignId}/history`).then(setHistory);
     api.get<Item[]>('/items').then(setItems);
+    api.get<EffectTemplate[]>('/effects').then(setEffects);
     api.get<{ active: boolean; battle_id?: number }>(`/battles/campaigns/${campaignId}/active`).then((b) => {
       if (b.active && b.battle_id) setActiveBattleId(b.battle_id);
     });
@@ -201,6 +203,7 @@ export default function CampaignControlPage() {
           campaignId={campaignId}
           party={state.party}
           items={items}
+          effects={effects}
           onApplied={load}
         />
 
@@ -236,7 +239,7 @@ export default function CampaignControlPage() {
             <summary className="cursor-pointer text-sm text-dungeon-400">Attach rewards/punishments to this advance</summary>
             <div className="mt-2 space-y-2 rounded border border-dungeon-600 p-2 text-sm">
               <p className="text-xs text-stone-500">These will be logged in event history when you advance.</p>
-              <AdvanceRewardBuilder party={state.party} items={items} onChange={setAdvanceRewards} />
+              <AdvanceRewardBuilder party={state.party} items={items} effects={effects} onChange={setAdvanceRewards} />
             </div>
           </details>
           <button className="btn-primary mt-2" onClick={() => setAdvanceConfirmOpen(true)}>Go to Next Event</button>
@@ -385,13 +388,15 @@ function BattleSetupModal({
 function AdvanceRewardBuilder({
   party,
   items,
+  effects,
   onChange,
 }: {
   party: { id: number; name: string; current_hp?: number; max_hp?: number }[];
   items: Item[];
+  effects: EffectTemplate[];
   onChange: (payload: RewardsPayload) => void;
 }) {
-  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp'>('item');
+  const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp' | 'effect'>('item');
   const [charId, setCharId] = useState(party[0]?.id || 0);
   const [itemId, setItemId] = useState(items[0]?.id || 0);
   const [randomWholeParty, setRandomWholeParty] = useState(true);
@@ -403,15 +408,20 @@ function AdvanceRewardBuilder({
   const [xpWholeParty, setXpWholeParty] = useState(true);
   const [xpCharId, setXpCharId] = useState(party[0]?.id || 0);
   const [xpAmount, setXpAmount] = useState(100);
+  const [effectWholeParty, setEffectWholeParty] = useState(false);
+  const [effectCharId, setEffectCharId] = useState(party[0]?.id || 0);
+  const [effectTemplateId, setEffectTemplateId] = useState(effects[0]?.id || 0);
 
   useEffect(() => {
     if (party[0]) {
       setCharId(party[0].id);
       setRandomCharId(party[0].id);
       setXpCharId(party[0].id);
+      setEffectCharId(party[0].id);
     }
     if (items[0]) setItemId(items[0].id);
-  }, [party, items]);
+    if (effects[0]) setEffectTemplateId(effects[0].id);
+  }, [party, items, effects]);
 
   const selectedMember = party.find((p) => p.id === charId);
   const selectedRandomMember = party.find((p) => p.id === randomCharId);
@@ -458,6 +468,22 @@ function AdvanceRewardBuilder({
       }
       return;
     }
+    if (rewardType === 'effect' && effectTemplateId) {
+      const targets = effectWholeParty ? party.map((p) => p.id) : [effectCharId].filter(Boolean);
+      if (targets.length) {
+        onChange({
+          rewards: {
+            temp_effects: targets.map((character_id) => ({
+              character_id,
+              effect_template_id: effectTemplateId,
+            })),
+          },
+        });
+      } else {
+        onChange({});
+      }
+      return;
+    }
     onChange({});
   }, [
     rewardType,
@@ -472,6 +498,9 @@ function AdvanceRewardBuilder({
     xpWholeParty,
     xpCharId,
     xpAmount,
+    effectWholeParty,
+    effectCharId,
+    effectTemplateId,
     party,
     onChange,
   ]);
@@ -483,6 +512,7 @@ function AdvanceRewardBuilder({
         <option value="random">Random tier loot</option>
         <option value="hp">HP change</option>
         <option value="xp">Grant XP</option>
+        <option value="effect">Apply effect</option>
       </select>
 
       {rewardType === 'item' && (
@@ -590,6 +620,36 @@ function AdvanceRewardBuilder({
             <label className="label">XP amount</label>
             <input className="input" type="number" min={1} value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} />
           </div>
+        </>
+      )}
+
+      {rewardType === 'effect' && (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={effectWholeParty} onChange={(e) => setEffectWholeParty(e.target.checked)} />
+            Whole party
+          </label>
+          {!effectWholeParty && (
+            <select className="input" value={effectCharId} onChange={(e) => setEffectCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <select className="input" value={effectTemplateId} onChange={(e) => setEffectTemplateId(+e.target.value)}>
+            {effects.filter((e) => e.is_buff).length > 0 && (
+              <optgroup label="Buffs">
+                {effects.filter((e) => e.is_buff).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </optgroup>
+            )}
+            {effects.filter((e) => !e.is_buff).length > 0 && (
+              <optgroup label="Debuffs">
+                {effects.filter((e) => !e.is_buff).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
         </>
       )}
     </div>

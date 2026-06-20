@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { SOLVER_MODALS } from '../../components/secrets/solverRegistry';
 import { EQUIP_SLOTS, slotLabel } from '../../game/equipment';
 import { Layout } from '../../components/Layout';
 import type { Character } from '../../api/client';
@@ -14,11 +15,16 @@ interface PartyMember {
   is_self?: boolean;
 }
 
-type ItemAction = 'equip' | 'use' | 'passive' | 'none';
+type ItemAction = 'equip' | 'use' | 'secret' | 'passive' | 'none';
+
+function isSecretItem(item: InvItem): boolean {
+  return (item.item_type || '').toLowerCase() === 'secret';
+}
 
 function getItemAction(item: InvItem): ItemAction {
   if (item.equipped_slot) return 'none';
   const type = (item.item_type || '').toLowerCase();
+  if (type === 'secret') return 'secret';
   if (type === 'consumable') return 'use';
   if (item.bag_only || item.stats.passive) return 'passive';
   if (type === 'key' || type === 'spell') return 'passive';
@@ -47,6 +53,7 @@ function formatStats(stats: Record<string, unknown>): string[] {
 
 function passiveHint(item: InvItem): string {
   const type = (item.item_type || '').toLowerCase();
+  if (type === 'secret') return 'Mysterious item — examine or solve';
   if (type === 'key') return 'Quest item — keep in bag';
   if (type === 'spell') return 'Spell scroll — keep in bag';
   return 'Passive effect while in bag';
@@ -66,8 +73,11 @@ function ItemCard({
   onEquip,
   onUnequip,
   onUse,
+  onExamine,
+  onSolve,
   onGive,
   onTrash,
+  secretMessage,
 }: {
   item: InvItem;
   party: PartyMember[];
@@ -75,14 +85,21 @@ function ItemCard({
   onEquip?: (id: number, slot: string) => void;
   onUnequip?: (id: number) => void;
   onUse?: (id: number) => void;
+  onExamine?: (id: InvItem) => void;
+  onSolve?: (item: InvItem) => void;
   onGive?: (item: InvItem, targetId: number) => void;
   onTrash?: (item: InvItem) => void;
+  secretMessage?: string;
 }) {
   const [giveOpen, setGiveOpen] = useState(false);
   const [targetId, setTargetId] = useState(() => party.find((p) => !p.is_self)?.character_id || 0);
   const statLines = formatStats(item.stats);
   const inBag = !item.equipped_slot;
   const action = getItemAction(item);
+  const revealed = Boolean(item.secret_state?.revealed);
+  const displayDescription = isSecretItem(item)
+    ? (revealed ? (item.revealed_description || item.description) : item.description)
+    : item.description;
   const slots = item.equip_slots || [];
   const twoHanded = Boolean(item.stats.two_handed);
   const equipOptions = twoHanded
@@ -119,7 +136,15 @@ function ItemCard({
         )}
       </div>
 
-      {item.description && <p className="mt-2 text-stone-400">{item.description}</p>}
+      {displayDescription && (
+        <p className={`mt-2 ${isSecretItem(item) && !revealed ? 'italic text-stone-500' : 'text-stone-400'}`}>
+          {displayDescription}
+        </p>
+      )}
+
+      {secretMessage && isSecretItem(item) && (
+        <p className="mt-2 text-sm text-dungeon-300">{secretMessage}</p>
+      )}
 
       {statLines.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-xs text-stone-500">
@@ -136,6 +161,14 @@ function ItemCard({
 
         {inBag && action === 'use' && onUse && (
           <button type="button" className="btn-primary text-xs" onClick={() => onUse(item.id)}>Use</button>
+        )}
+
+        {inBag && action === 'secret' && !revealed && onExamine && (
+          <button type="button" className="btn-primary text-xs" onClick={() => onExamine(item)}>Examine</button>
+        )}
+
+        {inBag && action === 'secret' && revealed && onSolve && (
+          <button type="button" className="btn-secondary text-xs" onClick={() => onSolve(item)}>Solve</button>
         )}
 
         {inBag && action === 'equip' && onEquip && equipOptions.map((slot) => (
@@ -240,6 +273,9 @@ export default function InventoryPage() {
   const [partyLoaded, setPartyLoaded] = useState(false);
   const [error, setError] = useState('');
   const [trashItem, setTrashItem] = useState<InvItem | null>(null);
+  const [solveItem, setSolveItem] = useState<InvItem | null>(null);
+  const [solveBusy, setSolveBusy] = useState(false);
+  const [secretMessages, setSecretMessages] = useState<Record<number, string>>({});
   const navigate = useNavigate();
 
   const load = () => {
@@ -273,6 +309,54 @@ export default function InventoryPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not use item');
+    }
+  };
+
+  const examineSecret = async (item: InvItem) => {
+    setError('');
+    setSecretMessages((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    try {
+      const res = await api.post<{
+        success: boolean;
+        message: string;
+        revealed_description?: string;
+      }>('/characters/me/examine-secret-item', { inventory_item_id: item.id });
+      setSecretMessages((prev) => ({ ...prev, [item.id]: res.message }));
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not examine item');
+    }
+  };
+
+  const submitSolve = async (guess: string) => {
+    if (!solveItem) return;
+    setError('');
+    setSolveBusy(true);
+    try {
+      const res = await api.post<{ success: boolean; message: string; character: Character }>(
+        '/characters/me/solve-secret-item',
+        { inventory_item_id: solveItem.id, guess },
+      );
+      setSecretMessages((prev) => {
+        const next = { ...prev };
+        delete next[solveItem.id];
+        return next;
+      });
+      if (res.success) {
+        setSolveItem(null);
+        setCharacter(res.character);
+        api.get<PartyMember[]>('/characters/me/party').then(setParty).catch(() => setParty([]));
+      } else {
+        setSecretMessages((prev) => ({ ...prev, [solveItem.id]: res.message }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not solve secret');
+    } finally {
+      setSolveBusy(false);
     }
   };
 
@@ -345,8 +429,11 @@ export default function InventoryPage() {
               hasParty={hasParty}
               onEquip={equip}
               onUse={useItem}
+              onExamine={examineSecret}
+              onSolve={setSolveItem}
               onGive={giveItem}
               onTrash={setTrashItem}
+              secretMessage={secretMessages[i.id]}
             />
           ))
         )}
@@ -361,6 +448,21 @@ export default function InventoryPage() {
           onCancel={() => setTrashItem(null)}
         />
       )}
+
+      {solveItem && (() => {
+        const solverType = solveItem.secret_solver_type || 'codeword';
+        const Modal = SOLVER_MODALS[solverType];
+        if (!Modal) return null;
+        return (
+          <Modal
+            itemName={solveItem.name}
+            hints={solveItem.secret_solver_hints || {}}
+            onSubmit={submitSolve}
+            onClose={() => setSolveItem(null)}
+            busy={solveBusy}
+          />
+        );
+      })()}
     </Layout>
   );
 }

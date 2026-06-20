@@ -15,9 +15,11 @@ from app.routers import (
     characters,
     enemies,
     events,
+    effects,
     groups,
     items,
     player_campaign,
+    secrets,
     skills,
     users,
     websocket,
@@ -59,6 +61,8 @@ api.include_router(groups.router)
 api.include_router(events.router)
 api.include_router(items.router)
 api.include_router(skills.router)
+api.include_router(effects.router)
+api.include_router(secrets.router)
 api.include_router(campaigns.router)
 api.include_router(campaign_runtime.router)
 api.include_router(player_campaign.router)

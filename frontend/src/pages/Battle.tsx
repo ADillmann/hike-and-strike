@@ -16,6 +16,7 @@ interface Actor {
   attack_bonus: number;
   shield_hp?: number;
   battle_stat_mods?: Record<string, number>;
+  battle_modifiers?: Record<string, number>;
   skills?: { id: number; name: string; uses_remaining: number; effect_type?: string }[];
 }
 
@@ -220,6 +221,14 @@ export default function BattlePage() {
 function ActorCard({ actor, isActive, isMe }: { actor: Actor; isActive?: boolean; isMe?: boolean }) {
   const mods = actor.battle_stat_mods || {};
   const modLines = Object.entries(mods).filter(([, v]) => v !== 0);
+  const battleMods = actor.battle_modifiers || {};
+  const battleModLines: string[] = [];
+  if (battleMods.damage_dealt_mod) {
+    battleModLines.push(`dmg ${battleMods.damage_dealt_mod > 0 ? '+' : ''}${battleMods.damage_dealt_mod}`);
+  }
+  if (battleMods.heal_mod) {
+    battleModLines.push(`heal ${battleMods.heal_mod > 0 ? '+' : ''}${battleMods.heal_mod}`);
+  }
 
   return (
     <div className={`rounded border p-3 ${isActive ? 'border-dungeon-400 bg-dungeon-800' : 'border-dungeon-700'} ${!actor.alive ? 'opacity-50' : ''}`}>
@@ -235,6 +244,9 @@ function ActorCard({ actor, isActive, isMe }: { actor: Actor; isActive?: boolean
         <p className="text-xs text-stone-500">
           {modLines.map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(', ')}
         </p>
+      )}
+      {battleModLines.length > 0 && (
+        <p className="text-xs text-dungeon-400">{battleModLines.join(', ')}</p>
       )}
       {!actor.alive && <p className="text-xs text-red-400">Down</p>}
     </div>

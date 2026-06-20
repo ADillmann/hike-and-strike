@@ -7,6 +7,7 @@ from app.models import (
     Campaign,
     CampaignEventNode,
     Character,
+    EffectTemplate,
     EventHistory,
     EventTemplate,
     GroupMember,
@@ -125,6 +126,24 @@ def grant_item(db: Session, character_id: int, item_template_id: int, equipped_s
     return item
 
 
+def apply_effect_template(db: Session, character_id: int, template_id: int) -> None:
+    template = db.get(EffectTemplate, template_id)
+    if not template:
+        return
+    db.add(
+        TemporaryEffect(
+            character_id=character_id,
+            effect_template_id=template.id,
+            label=template.label or template.name,
+            stat_modifiers=dict(template.stat_modifiers or {}),
+            battle_modifiers=dict(template.battle_modifiers or {}),
+            active_in_battle=template.active_in_battle,
+            cleared_on_rest=template.cleared_on_rest,
+            cleared_on_event=template.cleared_on_event,
+        )
+    )
+
+
 def apply_rewards_and_punishments(
     db: Session,
     campaign: Campaign,
@@ -173,6 +192,11 @@ def apply_rewards_and_punishments(
                         cleared_on_rest=entry.get("cleared_on_rest", True),
                     )
                 )
+        for entry in rewards.get("temp_effects", []):
+            char_id = entry.get("character_id")
+            template_id = entry.get("effect_template_id")
+            if char_id and template_id:
+                apply_effect_template(db, char_id, template_id)
 
     if punishments:
         for entry in punishments.get("hp_reduction", []):

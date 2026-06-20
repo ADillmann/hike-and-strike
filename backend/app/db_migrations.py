@@ -91,6 +91,36 @@ def apply_schema_patches(engine: Engine) -> None:
     )
     _patch_stat_change_log_nullable_master(engine)
     _reconcile_all_character_stat_points(engine)
+    _add_column_if_missing(
+        engine,
+        "temporary_effects",
+        "effect_template_id",
+        "effect_template_id INTEGER REFERENCES effect_templates(id)",
+    )
+    _add_column_if_missing(
+        engine,
+        "temporary_effects",
+        "battle_modifiers",
+        "battle_modifiers TEXT DEFAULT '{}'",
+    )
+    _add_column_if_missing(
+        engine,
+        "temporary_effects",
+        "active_in_battle",
+        "active_in_battle BOOLEAN DEFAULT 0",
+    )
+    _add_column_if_missing(
+        engine,
+        "item_templates",
+        "secret_template_id",
+        "secret_template_id INTEGER REFERENCES secret_templates(id)",
+    )
+    _add_column_if_missing(
+        engine,
+        "inventory_items",
+        "secret_state",
+        "secret_state TEXT DEFAULT '{}'",
+    )
 
 
 def _reconcile_all_character_stat_points(engine: Engine) -> None:

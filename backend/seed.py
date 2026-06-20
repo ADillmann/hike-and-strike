@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.game.constants import LEGACY_EQUIP_SLOTS
-from app.models import BattlePreset, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, Skill, SkillTemplate
+from app.models import BattlePreset, EffectTemplate, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, SecretTemplate, Skill, SkillTemplate
 from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
 
 BASE_ITEMS = [
@@ -38,6 +38,43 @@ BASE_SKILLS = [
     ("Dodge", 2, "Grant temporary shield HP that lasts until battle ends.", "support", {"support_mode": "shield", "shield_amount": 8}),
     ("Arcane Bolt", 3, "Ranged magical damage.", "range", {"bonus_damage": 0, "range_stat": "intelligence"}),
     ("Inspire", 2, "Boost an ally's stats for the rest of the battle.", "support", {"support_mode": "stat_boost", "stat": "charisma", "stat_bonus": 2}),
+]
+
+# name, description, label, stat_modifiers, battle_modifiers, is_buff, active_in_battle, cleared_on_rest, cleared_on_event
+BASE_EFFECTS = [
+    (
+        "Exhausted",
+        "You have not rested for a while; your body is tired.",
+        "Exhausted",
+        {},
+        {"damage_dealt_mod": -3},
+        False,
+        True,
+        True,
+        False,
+    ),
+    (
+        "Holy Aura",
+        "Divine energy enhances healing magic in battle.",
+        "Holy Aura",
+        {},
+        {"heal_mod": 3},
+        True,
+        True,
+        False,
+        False,
+    ),
+    (
+        "Blessed",
+        "A divine blessing bolsters presence.",
+        "Blessed",
+        {"charisma": 2},
+        {},
+        True,
+        False,
+        True,
+        False,
+    ),
 ]
 
 
@@ -89,6 +126,120 @@ def _ensure_system_skills(db: Session) -> None:
             ))
 
 
+def _ensure_system_effects(db: Session) -> None:
+    existing = {row.name for row in db.query(EffectTemplate).filter(EffectTemplate.is_system == True).all()}  # noqa: E712
+    for name, desc, label, stat_mods, battle_mods, is_buff, active_in_battle, cleared_on_rest, cleared_on_event in BASE_EFFECTS:
+        if name not in existing:
+            db.add(EffectTemplate(
+                name=name,
+                description=desc,
+                label=label,
+                stat_modifiers=stat_mods,
+                battle_modifiers=battle_mods,
+                is_buff=is_buff,
+                active_in_battle=active_in_battle,
+                cleared_on_rest=cleared_on_rest,
+                cleared_on_event=cleared_on_event,
+                is_system=True,
+            ))
+
+
+BASE_SECRETS = [
+    (
+        "Mysterious Box",
+        "A sealed box with strange markings. Codeword puzzle for demo.",
+        "codeword",
+        {"answer": "moonlight", "case_sensitive": False},
+        "intelligence",
+        "d20_plus_stat",
+        12,
+        "A mystery box — I wonder what is inside!",
+        "Nothing happens...",
+        "That doesn't work.",
+        {"xp": 0},
+        True,
+    ),
+    (
+        "Iron Vault",
+        "A heavy vault with a numeric lock.",
+        "number_lock",
+        {"code": "48291", "length": 5},
+        "dexterity",
+        "stat_vs_dc",
+        14,
+        "A sturdy iron vault. A five-digit combination lock blocks the way.",
+        "I do not know what to do with this.",
+        "The lock does not budge.",
+        {"xp": 100},
+        True,
+    ),
+]
+
+
+def _ensure_system_secrets(db: Session) -> None:
+    existing = {row.name for row in db.query(SecretTemplate).filter(SecretTemplate.is_system == True).all()}  # noqa: E712
+    for (
+        name,
+        desc,
+        solver_type,
+        solver_config,
+        examine_stat,
+        examine_mode,
+        examine_dc,
+        revealed_description,
+        fail_examine,
+        fail_solve,
+        rewards,
+        consume_on_solve,
+    ) in BASE_SECRETS:
+        if name not in existing:
+            db.add(
+                SecretTemplate(
+                    name=name,
+                    description=desc,
+                    solver_type=solver_type,
+                    solver_config=solver_config,
+                    examine_stat=examine_stat,
+                    examine_mode=examine_mode,
+                    examine_dc=examine_dc,
+                    revealed_description=revealed_description,
+                    fail_message_examine=fail_examine,
+                    fail_message_solve=fail_solve,
+                    rewards=rewards,
+                    consume_on_solve=consume_on_solve,
+                    is_system=True,
+                )
+            )
+
+
+def _ensure_secret_items(db: Session) -> None:
+    secret_by_name = {row.name: row for row in db.query(SecretTemplate).filter(SecretTemplate.is_system == True).all()}  # noqa: E712
+    links = [
+        ("Mysterious Box", "secret", 1, "Mysterious Box", "Mysterious Box"),
+        ("Iron Vault", "secret", 2, "Iron Vault", "Iron Vault"),
+    ]
+    for item_name, itype, tier, desc, secret_name in links:
+        secret = secret_by_name.get(secret_name)
+        if not secret:
+            continue
+        row = db.query(ItemTemplate).filter(ItemTemplate.name == item_name, ItemTemplate.is_system == True).first()  # noqa: E712
+        if not row:
+            db.add(
+                ItemTemplate(
+                    name=item_name,
+                    item_type=itype,
+                    tier=tier,
+                    stats={},
+                    description=desc,
+                    secret_template_id=secret.id,
+                    is_system=True,
+                )
+            )
+        elif row.secret_template_id != secret.id:
+            row.secret_template_id = secret.id
+            row.item_type = itype
+
+
 def migrate_character_skills(db: Session) -> None:
     for skill in db.query(Skill).filter(Skill.skill_template_id.is_(None)).all():
         template = db.query(SkillTemplate).filter(SkillTemplate.name == skill.name).first()
@@ -131,6 +282,9 @@ def seed_data(db: Session) -> None:
     _ensure_system_enemies(db)
     _ensure_system_presets(db)
     _ensure_system_skills(db)
+    _ensure_system_effects(db)
+    _ensure_system_secrets(db)
+    _ensure_secret_items(db)
 
     migrate_legacy_equipment(db)
     migrate_skill_effect_types(db)

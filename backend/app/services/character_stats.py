@@ -1,5 +1,6 @@
 from app.game.constants import (
     ARMOR_ITEM_TYPES,
+    BATTLE_MODIFIER_KEYS,
     EQUIP_SLOTS,
     HAND_SLOTS,
     HP_BASE,
@@ -121,10 +122,22 @@ def effective_stats(base_stats: dict, inventory_items, temporary_effects) -> dic
     return result
 
 
+def aggregate_battle_modifiers(temporary_effects) -> dict[str, int]:
+    totals: dict[str, int] = {key: 0 for key in BATTLE_MODIFIER_KEYS}
+    for effect in temporary_effects:
+        if not effect.active_in_battle:
+            continue
+        for key in BATTLE_MODIFIER_KEYS:
+            val = (effect.battle_modifiers or {}).get(key)
+            if isinstance(val, (int, float)):
+                totals[key] += int(val)
+    return {k: v for k, v in totals.items() if v != 0}
+
+
 def is_bag_only_item(item_template) -> bool:
     if not item_template:
         return True
-    if item_template.item_type in ("consumable", "key", "spell"):
+    if item_template.item_type in ("consumable", "key", "spell", "secret"):
         return True
     stats = item_template.stats or {}
     if stats.get("passive"):

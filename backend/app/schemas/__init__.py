@@ -82,6 +82,35 @@ class AssignSkillRequest(BaseModel):
     skill_template_id: int
 
 
+class EffectTemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    label: str = ""
+    is_buff: bool = True
+    stat_modifiers: dict[str, int] = Field(default_factory=dict)
+    battle_modifiers: dict[str, int] = Field(default_factory=dict)
+    active_in_battle: bool = False
+    cleared_on_rest: bool = True
+    cleared_on_event: bool = False
+
+
+class EffectTemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    label: str
+    is_buff: bool
+    stat_modifiers: dict[str, int]
+    battle_modifiers: dict[str, int]
+    active_in_battle: bool
+    cleared_on_rest: bool
+    cleared_on_event: bool
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
 class CharacterCreate(BaseModel):
     name: str
     race: str
@@ -191,12 +220,72 @@ class EventTemplateOut(BaseModel):
         from_attributes = True
 
 
+class SecretTemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    solver_type: str = "codeword"
+    solver_config: dict[str, Any] = Field(default_factory=dict)
+    examine_stat: str = "intelligence"
+    examine_mode: str = "d20_plus_stat"
+    examine_dc: int = 10
+    revealed_description: str = ""
+    fail_message_examine: str = "Nothing happens..."
+    fail_message_solve: str = "That doesn't work."
+    rewards: dict[str, Any] = Field(default_factory=dict)
+    consume_on_solve: bool = True
+
+
+class SecretTemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    solver_type: str
+    solver_config: dict[str, Any]
+    examine_stat: str
+    examine_mode: str
+    examine_dc: int
+    revealed_description: str
+    fail_message_examine: str
+    fail_message_solve: str
+    rewards: dict[str, Any]
+    consume_on_solve: bool
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ExamineSecretItemRequest(BaseModel):
+    inventory_item_id: int
+
+
+class SolveSecretItemRequest(BaseModel):
+    inventory_item_id: int
+    guess: str
+
+
+class SecretInteractionOut(BaseModel):
+    success: bool
+    message: str
+    revealed_description: str | None = None
+    can_solve: bool | None = None
+    roll: int | None = None
+    dc: int | None = None
+
+
+class SecretSolveResponse(BaseModel):
+    success: bool
+    message: str
+    character: CharacterOut
+
+
 class ItemTemplateCreate(BaseModel):
     name: str
     item_type: str
     tier: int = 1
     stats: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
+    secret_template_id: int | None = None
 
 
 class ItemTemplateOut(BaseModel):
@@ -206,6 +295,7 @@ class ItemTemplateOut(BaseModel):
     tier: int
     stats: dict[str, Any]
     description: str
+    secret_template_id: int | None = None
     is_system: bool
 
     class Config:

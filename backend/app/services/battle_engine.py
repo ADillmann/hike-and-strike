@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Battle, Campaign, Character, EnemyTemplate, InventoryItem, Skill
-from app.services.character_stats import compute_max_hp, effective_stats, weapon_attack_bonus
+from app.services.character_stats import aggregate_battle_modifiers, compute_max_hp, effective_stats, weapon_attack_bonus
 from app.services.skill_effects import normalize_effect_type, skill_battle_meta
 
 
@@ -67,6 +67,7 @@ def build_battle_state(
             "alive": character.current_hp > 0,
             "shield_hp": 0,
             "battle_stat_mods": {},
+            "battle_modifiers": aggregate_battle_modifiers(character.temporary_effects),
             "skills": [
                 {
                     "id": s.id,
@@ -200,6 +201,14 @@ def _actor_stat(actor: dict, stat: str) -> int:
     return base + int(mods.get(stat, 0))
 
 
+def _battle_damage_mod(actor: dict) -> int:
+    return int((actor.get("battle_modifiers") or {}).get("damage_dealt_mod", 0))
+
+
+def _battle_heal_mod(actor: dict) -> int:
+    return int((actor.get("battle_modifiers") or {}).get("heal_mod", 0))
+
+
 def _mitigation(target: dict) -> int:
     return _actor_stat(target, "durability") // 4
 
@@ -248,7 +257,7 @@ def _apply_skill(
         if not target or target["type"] != "player" or not target["alive"]:
             raise ValueError("Invalid heal target")
         heal_base = int(params.get("heal_base", 5))
-        heal_amount = heal_base + _actor_stat(actor, "intelligence") // 2
+        heal_amount = max(1, heal_base + _actor_stat(actor, "intelligence") // 2 + _battle_heal_mod(actor))
         target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal_amount)
         skill["uses_remaining"] -= 1
         return f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!"
@@ -258,7 +267,7 @@ def _apply_skill(
             raise ValueError("Invalid target")
         bonus = int(params.get("bonus_damage", 0))
         roll = random.randint(1, 8)
-        damage = max(1, actor.get("attack_bonus", 0) + roll + bonus - _mitigation(target))
+        damage = max(1, actor.get("attack_bonus", 0) + roll + bonus - _mitigation(target) + _battle_damage_mod(actor))
         _, shield_abs = _apply_damage(target, damage)
         skill["uses_remaining"] -= 1
         msg = f"{actor['name']} uses {name} (melee) on {target['name']} for {damage} damage!"
@@ -276,7 +285,7 @@ def _apply_skill(
         if range_stat not in actor.get("stats", {}):
             range_stat = "dexterity"
         roll = random.randint(1, 6)
-        damage = max(1, _actor_stat(actor, range_stat) // 2 + roll + bonus - _mitigation(target))
+        damage = max(1, _actor_stat(actor, range_stat) // 2 + roll + bonus - _mitigation(target) + _battle_damage_mod(actor))
         _, shield_abs = _apply_damage(target, damage)
         skill["uses_remaining"] -= 1
         msg = f"{actor['name']} uses {name} (range) on {target['name']} for {damage} damage!"
@@ -341,7 +350,8 @@ def perform_action(
             return {**state, "actors": actors}, "Cannot attack allies"
 
         roll = random.randint(1, 6)
-        damage = max(1, actor.get("attack_bonus", 0) + roll - _mitigation(target))
+        dmg_mod = _battle_damage_mod(actor) if actor["type"] == "player" else 0
+        damage = max(1, actor.get("attack_bonus", 0) + roll - _mitigation(target) + dmg_mod)
         _, shield_abs = _apply_damage(target, damage)
         log_msg = f"{actor['name']} attacks {target['name']} for {damage} damage!"
         if shield_abs:

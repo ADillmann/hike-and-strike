@@ -11,6 +11,11 @@ from app.schemas import ItemTemplateCreate, ItemTemplateOut
 router = APIRouter(prefix="/items", tags=["items"])
 
 
+def _validate_item_payload(payload: ItemTemplateCreate) -> None:
+    if payload.item_type == "secret" and not payload.secret_template_id:
+        raise HTTPException(status_code=400, detail="Secret items require a secret_template_id")
+
+
 @router.get("", response_model=list[ItemTemplateOut])
 def list_items(
     _: Annotated[User, Depends(require_master)],
@@ -29,6 +34,7 @@ def create_item(
     master: Annotated[User, Depends(require_master)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ItemTemplateOut:
+    _validate_item_payload(payload)
     item = ItemTemplate(**payload.model_dump(), master_id=master.id, is_system=False)
     db.add(item)
     db.commit()
@@ -48,6 +54,7 @@ def update_item(
         raise HTTPException(status_code=404, detail="Item not found")
     if not item.is_system and item.master_id != master.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    _validate_item_payload(payload)
     for k, v in payload.model_dump().items():
         setattr(item, k, v)
     db.commit()

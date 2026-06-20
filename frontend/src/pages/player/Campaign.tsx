@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 import type { Character } from '../../api/client';
+import { formatBattleMods, formatStatMods } from '../../utils/effects';
 
 interface CampaignView {
   active: boolean;
@@ -77,9 +78,19 @@ export default function CampaignPage() {
           {myCharacter && myCharacter.temporary_effects.length > 0 && (
             <div className="mt-3 border-t border-dungeon-700 pt-2">
               <h4 className="text-xs text-stone-500">Your effects</h4>
-              {myCharacter.temporary_effects.map((e) => (
-                <span key={e.id} className="mr-1 mt-1 inline-block rounded bg-red-900/50 px-2 py-0.5 text-xs">{e.label}</span>
-              ))}
+              <div className="mt-1 space-y-1">
+                {myCharacter.temporary_effects.map((e) => {
+                  const statLine = formatStatMods(e.stat_modifiers);
+                  const battleLine = formatBattleMods(e.active_in_battle, e.battle_modifiers);
+                  return (
+                    <div key={e.id} className="rounded bg-red-900/50 px-2 py-0.5 text-xs">
+                      <span className="font-medium">{e.label}</span>
+                      {statLine && <span className="ml-1 text-stone-400">{statLine}</span>}
+                      {battleLine && <span className="ml-1 text-dungeon-300">{battleLine}</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           <p className="mt-4 text-xs text-stone-500">Discuss with your group. The Master will advance the story.</p>

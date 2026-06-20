@@ -16,6 +16,8 @@ STAT_CAP = 20
 STAT_POINTS_PER_LEVEL = 2
 XP_PER_LEVEL_BASE = 100
 
+BATTLE_MODIFIER_KEYS = ("damage_dealt_mod", "heal_mod")
+
 RACES = ["Human", "Elf", "Dwarf", "Halfling", "Orc", "Tiefling"]
 
 STARTER_SKILLS = [
@@ -81,7 +83,11 @@ ITEM_TYPES = (
     "spell",
     "consumable",
     "key",
+    "secret",
 )
+
+SECRET_SOLVER_TYPES = ("codeword", "number_lock")
+SECRET_EXAMINE_MODES = ("d20_plus_stat", "stat_vs_dc")
 
 ARMOR_ITEM_TYPES = ("head", "armor", "gloves", "legs", "shoes", "shield")
 

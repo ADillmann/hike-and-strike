@@ -20,6 +20,19 @@ interface Item {
   tier: number;
 }
 
+export interface EffectTemplate {
+  id: number;
+  name: string;
+  description: string;
+  label: string;
+  is_buff: boolean;
+  stat_modifiers: Record<string, number>;
+  battle_modifiers: Record<string, number>;
+  active_in_battle: boolean;
+  cleared_on_rest: boolean;
+  cleared_on_event: boolean;
+}
+
 interface InvItem {
   id: number;
   name: string;
@@ -28,7 +41,7 @@ interface InvItem {
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
 
-type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'xp' | 'remove';
+type RewardConfirmAction = 'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'remove';
 
 interface PendingRewardConfirm {
   action: RewardConfirmAction;
@@ -41,16 +54,18 @@ export function RewardsPanel({
   campaignId,
   party,
   items,
+  effects,
   onApplied,
   compact,
 }: {
   campaignId: number;
   party: PartyMember[];
   items: Item[];
+  effects: EffectTemplate[];
   onApplied?: () => void;
   compact?: boolean;
 }) {
-  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'hp' | 'xp' | 'remove'>('item');
+  const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'remove'>('item');
   const [rewardCharId, setRewardCharId] = useState(0);
   const [rewardItemId, setRewardItemId] = useState(0);
   const [wholeParty, setWholeParty] = useState(false);
@@ -65,6 +80,9 @@ export function RewardsPanel({
   const [xpWholeParty, setXpWholeParty] = useState(true);
   const [xpCharId, setXpCharId] = useState(0);
   const [xpAmount, setXpAmount] = useState(100);
+  const [effectWholeParty, setEffectWholeParty] = useState(false);
+  const [effectCharId, setEffectCharId] = useState(0);
+  const [effectTemplateId, setEffectTemplateId] = useState(0);
   const [pendingConfirm, setPendingConfirm] = useState<PendingRewardConfirm | null>(null);
   const [removeCharId, setRemoveCharId] = useState(0);
   const [removeInvId, setRemoveInvId] = useState(0);
@@ -77,9 +95,11 @@ export function RewardsPanel({
       setHpCharId(party[0].id);
       setXpCharId(party[0].id);
       setRemoveCharId(party[0].id);
+      setEffectCharId(party[0].id);
     }
     if (items[0]) setRewardItemId(items[0].id);
-  }, [party, items]);
+    if (effects[0]) setEffectTemplateId(effects[0].id);
+  }, [party, items, effects]);
 
   useEffect(() => {
     if (!removeCharId) return;
@@ -151,6 +171,18 @@ export function RewardsPanel({
     await apply({
       rewards: {
         xp: targets.map((character_id) => ({ character_id, amount: xpAmount })),
+      },
+    });
+  };
+
+  const grantEffect = async () => {
+    const targets = effectWholeParty ? party.map((p) => p.id) : [effectCharId];
+    await apply({
+      rewards: {
+        temp_effects: targets.map((character_id) => ({
+          character_id,
+          effect_template_id: effectTemplateId,
+        })),
       },
     });
   };
@@ -252,6 +284,28 @@ export function RewardsPanel({
     });
   };
 
+  const requestEffectConfirm = () => {
+    const template = effects.find((e) => e.id === effectTemplateId);
+    if (!template) return;
+    const desc = template.description ? ` — ${template.description}` : '';
+    if (effectWholeParty) {
+      setPendingConfirm({
+        action: 'effect',
+        title: 'Apply Effect',
+        message: `Apply "${template.name}"${desc} to the whole party (${party.length} characters)?`,
+        confirmLabel: 'Apply',
+      });
+      return;
+    }
+    const character = party.find((p) => p.id === effectCharId);
+    setPendingConfirm({
+      action: 'effect',
+      title: 'Apply Effect',
+      message: `Apply "${template.name}"${desc} to ${character?.name ?? 'character'}?`,
+      confirmLabel: 'Apply',
+    });
+  };
+
   const requestRemoveConfirm = () => {
     if (!removeInvId) return;
     const character = party.find((p) => p.id === removeCharId);
@@ -287,6 +341,9 @@ export function RewardsPanel({
       case 'xp':
         await grantXp();
         break;
+      case 'effect':
+        await grantEffect();
+        break;
       case 'remove':
         await removeItem();
         break;
@@ -298,6 +355,7 @@ export function RewardsPanel({
     { id: 'random' as const, label: 'Random' },
     { id: 'buff' as const, label: 'Buff' },
     { id: 'debuff' as const, label: 'Debuff' },
+    { id: 'effect' as const, label: 'Effect' },
     { id: 'hp' as const, label: 'HP' },
     { id: 'xp' as const, label: 'XP' },
     { id: 'remove' as const, label: 'Remove' },
@@ -366,6 +424,42 @@ export function RewardsPanel({
           </div>
           <button className={tab === 'buff' ? 'btn-secondary w-full' : 'btn-danger w-full'} onClick={requestBuffConfirm}>
             Apply {tab === 'buff' ? 'Buff' : 'Debuff'}
+          </button>
+        </div>
+      )}
+
+      {tab === 'effect' && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={effectWholeParty} onChange={(e) => setEffectWholeParty(e.target.checked)} />
+            Whole party
+          </label>
+          {!effectWholeParty && (
+            <select className="input" value={effectCharId} onChange={(e) => setEffectCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <select className="input" value={effectTemplateId} onChange={(e) => setEffectTemplateId(+e.target.value)}>
+            {effects.filter((e) => e.is_buff).length > 0 && (
+              <optgroup label="Buffs">
+                {effects.filter((e) => e.is_buff).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}{e.description ? ` — ${e.description}` : ''}</option>
+                ))}
+              </optgroup>
+            )}
+            {effects.filter((e) => !e.is_buff).length > 0 && (
+              <optgroup label="Debuffs">
+                {effects.filter((e) => !e.is_buff).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}{e.description ? ` — ${e.description}` : ''}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          {effects.length === 0 && (
+            <p className="text-xs text-stone-500">No effect templates yet. Create them on the Effects page.</p>
+          )}
+          <button className="btn-secondary w-full" onClick={requestEffectConfirm} disabled={!effectTemplateId}>
+            Apply Effect
           </button>
         </div>
       )}

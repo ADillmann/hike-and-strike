@@ -109,6 +109,29 @@ class EventTemplate(Base):
     nodes: Mapped[list["CampaignEventNode"]] = relationship(back_populates="event_template")
 
 
+class SecretTemplate(Base):
+    __tablename__ = "secret_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+    solver_type: Mapped[str] = mapped_column(String(32), default="codeword")
+    solver_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    examine_stat: Mapped[str] = mapped_column(String(32), default="intelligence")
+    examine_mode: Mapped[str] = mapped_column(String(32), default="d20_plus_stat")
+    examine_dc: Mapped[int] = mapped_column(Integer, default=10)
+    revealed_description: Mapped[str] = mapped_column(Text, default="")
+    fail_message_examine: Mapped[str] = mapped_column(String(256), default="Nothing happens...")
+    fail_message_solve: Mapped[str] = mapped_column(String(256), default="That doesn't work.")
+    rewards: Mapped[dict] = mapped_column(JSON, default=dict)
+    consume_on_solve: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    item_templates: Mapped[list["ItemTemplate"]] = relationship(back_populates="secret_template")
+
+
 class ItemTemplate(Base):
     __tablename__ = "item_templates"
 
@@ -119,9 +142,11 @@ class ItemTemplate(Base):
     tier: Mapped[int] = mapped_column(Integer, default=1)
     stats: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str] = mapped_column(Text, default="")
+    secret_template_id: Mapped[int | None] = mapped_column(ForeignKey("secret_templates.id"), nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    secret_template: Mapped["SecretTemplate | None"] = relationship(back_populates="item_templates")
     inventory_items: Mapped[list["InventoryItem"]] = relationship(back_populates="item_template")
 
 
@@ -139,6 +164,24 @@ class SkillTemplate(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
     character_skills: Mapped[list["Skill"]] = relationship(back_populates="skill_template")
+
+
+class EffectTemplate(Base):
+    __tablename__ = "effect_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+    label: Mapped[str] = mapped_column(String(128))
+    is_buff: Mapped[bool] = mapped_column(Boolean, default=True)
+    stat_modifiers: Mapped[dict] = mapped_column(JSON, default=dict)
+    battle_modifiers: Mapped[dict] = mapped_column(JSON, default=dict)
+    active_in_battle: Mapped[bool] = mapped_column(Boolean, default=False)
+    cleared_on_rest: Mapped[bool] = mapped_column(Boolean, default=True)
+    cleared_on_event: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Campaign(Base):
@@ -201,6 +244,7 @@ class InventoryItem(Base):
     item_template_id: Mapped[int] = mapped_column(ForeignKey("item_templates.id"))
     equipped_slot: Mapped[str | None] = mapped_column(String(32), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
+    secret_state: Mapped[dict] = mapped_column(JSON, default=dict)
 
     character: Mapped["Character"] = relationship(back_populates="inventory_items")
     item_template: Mapped["ItemTemplate"] = relationship(back_populates="inventory_items")
@@ -225,8 +269,11 @@ class TemporaryEffect(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    effect_template_id: Mapped[int | None] = mapped_column(ForeignKey("effect_templates.id"), nullable=True)
     label: Mapped[str] = mapped_column(String(128))
     stat_modifiers: Mapped[dict] = mapped_column(JSON, default=dict)
+    battle_modifiers: Mapped[dict] = mapped_column(JSON, default=dict)
+    active_in_battle: Mapped[bool] = mapped_column(Boolean, default=False)
     cleared_on_rest: Mapped[bool] = mapped_column(Boolean, default=True)
     cleared_on_event: Mapped[bool] = mapped_column(Boolean, default=False)
 

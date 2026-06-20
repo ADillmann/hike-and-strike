@@ -10,10 +10,16 @@ interface Item {
   tier: number;
   description: string;
   stats: Record<string, unknown>;
+  secret_template_id?: number | null;
   is_system: boolean;
 }
 
-const ITEM_TYPES = ['weapon', 'shield', 'head', 'armor', 'gloves', 'legs', 'shoes', 'ring', 'necklace', 'spell', 'consumable', 'key'];
+interface SecretOption {
+  id: number;
+  name: string;
+}
+
+const ITEM_TYPES = ['weapon', 'shield', 'head', 'armor', 'gloves', 'legs', 'shoes', 'ring', 'necklace', 'spell', 'consumable', 'key', 'secret'];
 
 const STAT_FIELDS = [
   { key: 'strength', label: 'Strength' },
@@ -40,6 +46,7 @@ type ItemForm = {
   heal: number;
   two_handed: boolean;
   passive: boolean;
+  secret_template_id: number;
 };
 
 const defaultForm = (): ItemForm => ({
@@ -58,6 +65,7 @@ const defaultForm = (): ItemForm => ({
   heal: 0,
   two_handed: false,
   passive: false,
+  secret_template_id: 0,
 });
 
 function numStat(stats: Record<string, unknown>, key: string): number {
@@ -83,6 +91,7 @@ function formFromItem(item: Item): ItemForm {
     heal: numStat(s, 'heal'),
     two_handed: Boolean(s.two_handed),
     passive: Boolean(s.passive),
+    secret_template_id: item.secret_template_id ?? 0,
   };
 }
 
@@ -149,15 +158,18 @@ function consumableFormFields(form: ItemForm): ItemForm {
 function ItemFormFields({
   form,
   onChange,
+  secrets,
 }: {
   form: ItemForm;
   onChange: (next: ItemForm) => void;
+  secrets: SecretOption[];
 }) {
   const set = <K extends keyof ItemForm>(key: K, value: ItemForm[K]) => {
     onChange({ ...form, [key]: value });
   };
 
   const isConsumable = form.item_type === 'consumable';
+  const isSecret = form.item_type === 'secret';
 
   return (
     <div className="space-y-3">
@@ -194,7 +206,21 @@ function ItemFormFields({
         <textarea className="input" value={form.description} onChange={(e) => set('description', e.target.value)} />
       </div>
 
-      {isConsumable ? (
+      {isSecret ? (
+        <div>
+          <label className="label">Secret template</label>
+          <select
+            className="input"
+            value={form.secret_template_id}
+            onChange={(e) => set('secret_template_id', +e.target.value)}
+            required
+          >
+            <option value={0}>Select secret...</option>
+            {secrets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-stone-500">Puzzle logic and rewards come from the secret template.</p>
+        </div>
+      ) : isConsumable ? (
         <div>
           <label className="label">Healing (HP on use)</label>
           <input
@@ -265,36 +291,37 @@ function ItemFormFields({
 
 export default function ItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
+  const [secrets, setSecrets] = useState<SecretOption[]>([]);
   const [form, setForm] = useState<ItemForm>(defaultForm);
   const [editing, setEditing] = useState<{ id: number; is_system: boolean; form: ItemForm } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const load = () => api.get<Item[]>('/items').then(setItems);
+  const load = () => {
+    api.get<Item[]>('/items').then(setItems);
+    api.get<SecretOption[]>('/secrets').then(setSecrets);
+  };
 
   useEffect(() => { load(); }, []);
 
+  const buildItemPayload = (f: ItemForm) => ({
+    name: f.name,
+    item_type: f.item_type,
+    tier: f.tier,
+    description: f.description,
+    stats: buildStats(f),
+    secret_template_id: f.item_type === 'secret' ? f.secret_template_id || null : null,
+  });
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.post('/items', {
-      name: form.name,
-      item_type: form.item_type,
-      tier: form.tier,
-      description: form.description,
-      stats: buildStats(form),
-    });
+    await api.post('/items', buildItemPayload(form));
     setForm(defaultForm());
     load();
   };
 
   const saveEdit = async () => {
     if (!editing) return;
-    await api.patch(`/items/${editing.id}`, {
-      name: editing.form.name,
-      item_type: editing.form.item_type,
-      tier: editing.form.tier,
-      description: editing.form.description,
-      stats: buildStats(editing.form),
-    });
+    await api.patch(`/items/${editing.id}`, buildItemPayload(editing.form));
     setEditing(null);
     load();
   };
@@ -311,7 +338,7 @@ export default function ItemsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <form onSubmit={create} className="card space-y-3">
           <h2 className="font-semibold text-dungeon-300">Custom Item</h2>
-          <ItemFormFields form={form} onChange={setForm} />
+          <ItemFormFields form={form} onChange={setForm} secrets={secrets} />
           <button className="btn-primary" type="submit">Add Item</button>
         </form>
 
@@ -362,7 +389,7 @@ export default function ItemsPage() {
               Edit Item
               {editing.is_system && <span className="ml-2 text-sm font-normal text-dungeon-400">(base item)</span>}
             </h3>
-            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} />
+            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} secrets={secrets} />
             <div className="flex gap-2">
               <button className="btn-primary" onClick={saveEdit}>Save</button>
               <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>

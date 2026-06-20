@@ -13,6 +13,7 @@ from app.models import (
     Character,
     GroupMember,
     InventoryItem,
+    ItemTemplate,
     Skill,
     SkillTemplate,
     StatChangeLog,
@@ -26,9 +27,13 @@ from app.schemas import (
     CharacterOut,
     DiscardItemRequest,
     EquipRequest,
+    ExamineSecretItemRequest,
     GiveItemRequest,
     GrantXpRequest,
     ReleaseStatRequest,
+    SecretInteractionOut,
+    SecretSolveResponse,
+    SolveSecretItemRequest,
     StatChangeOut,
     StatEditRequest,
     UseItemRequest,
@@ -43,6 +48,7 @@ from app.services.character_progression import (
 from app.services.skill_usage import use_skill_outside_battle
 from app.services.skill_effects import skill_battle_meta, skill_from_template
 from app.services.campaign_engine import broadcast_character_updated, recalculate_character_hp
+from app.services.secret_engine import examine_secret_item, secret_inventory_payload, solve_secret_item
 from app.services.character_stats import (
     effective_stats,
     equip_slots_for_item,
@@ -76,12 +82,40 @@ def _add_skill_templates(db: Session, character_id: int, template_ids: list[int]
         db.add(skill_from_template(character_id, template))
 
 
+def _serialize_inventory_item(inv: InventoryItem) -> dict[str, Any]:
+    template = inv.item_template
+    secret = template.secret_template if template else None
+    is_secret = bool(template and template.item_type == "secret")
+    state = inv.secret_state or {}
+    revealed = bool(state.get("revealed"))
+    description = template.description if template else ""
+    if is_secret and not revealed:
+        description = "???"
+    entry: dict[str, Any] = {
+        "id": inv.id,
+        "item_template_id": inv.item_template_id,
+        "name": template.name if template else None,
+        "item_type": template.item_type if template else None,
+        "tier": template.tier if template else None,
+        "description": description,
+        "stats": template.stats if template else {},
+        "equipped_slot": normalize_equipped_slot(inv.equipped_slot),
+        "quantity": inv.quantity,
+        "equippable": is_equippable(template) if template else False,
+        "bag_only": is_bag_only_item(template) if template else True,
+        "equip_slots": equip_slots_for_item(template) if template else [],
+    }
+    if is_secret:
+        entry.update(secret_inventory_payload(inv, secret))
+    return entry
+
+
 def _serialize_character(db: Session, character: Character) -> CharacterOut:
     db.refresh(character)
     character = (
         db.query(Character)
         .options(
-            joinedload(Character.inventory_items).joinedload(InventoryItem.item_template),
+            joinedload(Character.inventory_items).joinedload(InventoryItem.item_template).joinedload(ItemTemplate.secret_template),
             joinedload(Character.skills).joinedload(Skill.skill_template),
             joinedload(Character.temporary_effects),
             joinedload(Character.user),
@@ -115,25 +149,16 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
             }
             for s in character.skills
         ],
-        inventory=[
-            {
-                "id": i.id,
-                "item_template_id": i.item_template_id,
-                "name": i.item_template.name if i.item_template else None,
-                "item_type": i.item_template.item_type if i.item_template else None,
-                "tier": i.item_template.tier if i.item_template else None,
-                "description": i.item_template.description if i.item_template else "",
-                "stats": i.item_template.stats if i.item_template else {},
-                "equipped_slot": normalize_equipped_slot(i.equipped_slot),
-                "quantity": i.quantity,
-                "equippable": is_equippable(i.item_template) if i.item_template else False,
-                "bag_only": is_bag_only_item(i.item_template) if i.item_template else True,
-                "equip_slots": equip_slots_for_item(i.item_template) if i.item_template else [],
-            }
-            for i in character.inventory_items
-        ],
+        inventory=[_serialize_inventory_item(i) for i in character.inventory_items],
         temporary_effects=[
-            {"id": e.id, "label": e.label, "stat_modifiers": e.stat_modifiers, "cleared_on_rest": e.cleared_on_rest}
+            {
+                "id": e.id,
+                "label": e.label,
+                "stat_modifiers": e.stat_modifiers,
+                "battle_modifiers": e.battle_modifiers or {},
+                "active_in_battle": e.active_in_battle,
+                "cleared_on_rest": e.cleared_on_rest,
+            }
             for e in character.temporary_effects
         ],
     )
@@ -649,6 +674,66 @@ async def use_skill(
     if target.id != caster.id:
         await broadcast_character_updated(db, target.id)
     return _serialize_character(db, caster)
+
+
+@router.post("/me/examine-secret-item", response_model=SecretInteractionOut)
+async def examine_secret_item_endpoint(
+    payload: ExamineSecretItemRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SecretInteractionOut:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = (
+        db.query(Character)
+        .options(
+            joinedload(Character.inventory_items).joinedload(InventoryItem.item_template),
+            joinedload(Character.temporary_effects),
+        )
+        .filter(Character.user_id == user.id)
+        .first()
+    )
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+    try:
+        result = examine_secret_item(db, character, payload.inventory_item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    await broadcast_character_updated(db, character.id)
+    return SecretInteractionOut(**result)
+
+
+@router.post("/me/solve-secret-item", response_model=SecretSolveResponse)
+async def solve_secret_item_endpoint(
+    payload: SolveSecretItemRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SecretSolveResponse:
+    if user.role != UserRole.player:
+        raise HTTPException(status_code=403, detail="Players only")
+    character = (
+        db.query(Character)
+        .options(
+            joinedload(Character.inventory_items).joinedload(InventoryItem.item_template),
+            joinedload(Character.temporary_effects),
+        )
+        .filter(Character.user_id == user.id)
+        .first()
+    )
+    if not character:
+        raise HTTPException(status_code=404, detail="No character")
+    try:
+        result = solve_secret_item(db, character, payload.inventory_item_id, payload.guess)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    await broadcast_character_updated(db, character.id)
+    return SecretSolveResponse(
+        success=result["success"],
+        message=result["message"],
+        character=_serialize_character(db, character),
+    )
 
 
 @router.post("/me/discard-item", response_model=CharacterOut)

@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout, StatBadge } from '../../components/Layout';
 import type { Character } from '../../api/client';
+import { formatBattleMods, formatStatMods } from '../../utils/effects';
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
 const DEFAULT_STATS = Object.fromEntries(STAT_NAMES.map((s) => [s, 8]));
@@ -220,9 +221,19 @@ export function CharacterSheetPage() {
         {character.temporary_effects.length > 0 && (
           <div className="mt-4">
             <h3 className="text-sm text-stone-400">Active effects</h3>
-            {character.temporary_effects.map((e) => (
-              <span key={e.id} className="mr-2 rounded bg-red-900/50 px-2 py-1 text-xs">{e.label}</span>
-            ))}
+            <div className="mt-1 space-y-1">
+              {character.temporary_effects.map((e) => {
+                const statLine = formatStatMods(e.stat_modifiers);
+                const battleLine = formatBattleMods(e.active_in_battle, e.battle_modifiers);
+                return (
+                  <div key={e.id} className="rounded bg-red-900/50 px-2 py-1 text-xs">
+                    <span className="font-medium">{e.label}</span>
+                    {statLine && <span className="ml-2 text-stone-400">{statLine}</span>}
+                    {battleLine && <span className="ml-2 text-dungeon-300">{battleLine}</span>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

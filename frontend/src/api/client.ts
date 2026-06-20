@@ -89,6 +89,18 @@ export interface Character {
     equippable: boolean;
     bag_only: boolean;
     equip_slots: string[];
+    secret_template_id?: number | null;
+    secret_state?: { examined: boolean; revealed: boolean };
+    revealed_description?: string;
+    secret_solver_type?: string;
+    secret_solver_hints?: Record<string, unknown>;
   }[];
-  temporary_effects: { id: number; label: string; stat_modifiers: Record<string, number> }[];
+  temporary_effects: {
+    id: number;
+    label: string;
+    stat_modifiers: Record<string, number>;
+    battle_modifiers?: Record<string, number>;
+    active_in_battle?: boolean;
+    cleared_on_rest?: boolean;
+  }[];
 }
