@@ -7,7 +7,7 @@ Browser-based tabletop RPG for local network play. Master organizes campaigns; p
 - **Frontend:** React + Vite + TypeScript + Tailwind
 - **Backend:** FastAPI + SQLite + WebSockets
 - **Phase 1:** Auth, character creation, events, campaigns, rewards/punishments, master stat editing
-- **Phase 2:** Battle system (stubbed in UI)
+- **Phase 2:** Grid-based battle system — master setup (preset, placement), initiative turns, melee charge, move/guard, ranged skills, consumables, auto enemy AI, pre-battle reposition for high initiative
 
 ## Quick start
 
@@ -78,7 +78,17 @@ make backend
 3. **Events** — Build story/rest/puzzle events (generic events seeded: Bonfire, House, Shop, etc.)
 4. **Items** — Manage loot pool (base items seeded on first run)
 5. **Campaigns** — Chain events, assign group, start campaign
-6. **Campaign Control** — Evaluate outcomes, jump to any event, grant rewards/punishments, edit stats permanently
+6. **Campaign Control** — Evaluate outcomes, jump to any event, grant rewards/punishments, edit stats permanently, start battles from battle-hook events
+
+## Battle system
+
+Battles launch from **battle_hook** events in Campaign Control:
+
+1. **Setup** — Choose enemy preset and initiative bonuses (prefilled from event `battle_config` if set on the Events page).
+2. **Placement** — Drag party and enemies on a square grid (`party_size + 1`, min 5, max 9).
+3. **Pre-battle** — Characters with initiative ≥ 14 may reposition 1–2 cells before combat.
+4. **Combat** — Turn order by initiative. Players: melee attack (optional charge), move (up to 6 cells), guard (up to 2 cells, −30% damage; +15% with shield), skills, consumables. Enemies act automatically.
+5. **Outcome** — Victory/defeat may apply optional rewards from event config; campaign advance is blocked while a battle is active.
 
 ## Player workflow
 

@@ -106,6 +106,7 @@ class EventTemplate(Base):
     is_generic: Mapped[bool] = mapped_column(Boolean, default=False)
     branch_hints: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     shop_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    battle_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     nodes: Mapped[list["CampaignEventNode"]] = relationship(back_populates="event_template")

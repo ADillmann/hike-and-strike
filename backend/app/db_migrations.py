@@ -128,6 +128,12 @@ def apply_schema_patches(engine: Engine) -> None:
         "shop_config",
         "shop_config TEXT",
     )
+    _add_column_if_missing(
+        engine,
+        "event_templates",
+        "battle_config",
+        "battle_config TEXT",
+    )
     _ensure_currency_settings_table(engine)
     _reconcile_all_character_stat_points(engine)
 

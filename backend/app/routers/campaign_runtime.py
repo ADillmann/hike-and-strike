@@ -48,6 +48,8 @@ async def advance_campaign(
     campaign = db.get(Campaign, campaign_id)
     if not campaign or campaign.master_id != master.id:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign_has_active_battle(db, campaign_id):
+        raise HTTPException(status_code=409, detail="Cannot advance campaign during an active battle")
     node = db.get(CampaignEventNode, payload.node_id)
     if not node or node.campaign_id != campaign_id:
         raise HTTPException(status_code=404, detail="Node not found")

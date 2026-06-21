@@ -202,6 +202,7 @@ class EventTemplateCreate(BaseModel):
     is_generic: bool = False
     branch_hints: dict | None = None
     shop_config: dict | None = None
+    battle_config: dict | None = None
 
 
 class EventTemplateUpdate(BaseModel):
@@ -209,6 +210,7 @@ class EventTemplateUpdate(BaseModel):
     description: str | None = None
     event_type: str | None = None
     shop_config: dict | None = None
+    battle_config: dict | None = None
 
 
 class EventTemplateOut(BaseModel):
@@ -220,6 +222,7 @@ class EventTemplateOut(BaseModel):
     is_generic: bool
     branch_hints: dict | None = None
     shop_config: dict | None = None
+    battle_config: dict | None = None
 
     class Config:
         from_attributes = True
@@ -463,8 +466,26 @@ class BattleCreateRequest(BaseModel):
     enemy_initiative_bonus: float = 0.0
 
 
+class BattleCell(BaseModel):
+    x: int
+    y: int
+
+
 class BattleActionRequest(BaseModel):
     action: str
     actor_id: str | None = None
     target_id: str | None = None
     skill_id: int | None = None
+    charge_cell: BattleCell | None = None
+    move_cell: BattleCell | None = None
+    guard_cell: BattleCell | None = None
+    inventory_item_id: int | None = None
+
+
+class BattlePositionsUpdate(BaseModel):
+    positions: dict[str, BattleCell]
+
+
+class PrebattleMoveRequest(BaseModel):
+    actor_id: str
+    cell: BattleCell

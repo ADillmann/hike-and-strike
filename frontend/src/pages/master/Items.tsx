@@ -46,6 +46,8 @@ type ItemForm = {
   damage: number;
   heal: number;
   two_handed: boolean;
+  weapon_class: 'melee' | 'range';
+  weapon_range: number;
   passive: boolean;
   secret_template_id: number;
   base_price: number;
@@ -66,6 +68,8 @@ const defaultForm = (): ItemForm => ({
   damage: 0,
   heal: 0,
   two_handed: false,
+  weapon_class: 'melee',
+  weapon_range: 4,
   passive: false,
   secret_template_id: 0,
   base_price: 0,
@@ -93,6 +97,8 @@ function formFromItem(item: Item): ItemForm {
     damage: numStat(s, 'damage'),
     heal: numStat(s, 'heal'),
     two_handed: Boolean(s.two_handed),
+    weapon_class: s.weapon_class === 'range' ? 'range' : 'melee',
+    weapon_range: numStat(s, 'range') || 4,
     passive: Boolean(s.passive),
     secret_template_id: item.secret_template_id ?? 0,
     base_price: item.base_price ?? 0,
@@ -113,7 +119,17 @@ function buildStats(form: ItemForm): Record<string, unknown> {
   }
   if (form.armor_bonus !== 0) stats.armor_bonus = form.armor_bonus;
   if (form.damage !== 0) stats.damage = form.damage;
-  if (form.two_handed) stats.two_handed = true;
+  if (form.item_type === 'weapon') {
+    stats.weapon_class = form.weapon_class;
+    if (form.weapon_class === 'range') {
+      stats.two_handed = true;
+      if (form.weapon_range > 0) stats.range = form.weapon_range;
+    } else if (form.two_handed) {
+      stats.two_handed = true;
+    }
+  } else if (form.two_handed) {
+    stats.two_handed = true;
+  }
   if (form.passive) stats.passive = true;
   return stats;
 }
@@ -137,6 +153,13 @@ function formatItemStats(itemType: string, stats: Record<string, unknown>): stri
   if (typeof stats.damage === 'number' && stats.damage !== 0) {
     lines.push(`Damage ${stats.damage}`);
   }
+  if (itemType === 'weapon') {
+    const wc = stats.weapon_class === 'range' ? 'Ranged' : 'Melee';
+    lines.push(`${wc} weapon`);
+    if (stats.weapon_class === 'range' && typeof stats.range === 'number') {
+      lines.push(`Range ${stats.range}`);
+    }
+  }
   if (typeof stats.heal === 'number' && stats.heal !== 0) {
     lines.push(`Heal ${stats.heal}`);
   }
@@ -155,6 +178,8 @@ function consumableFormFields(form: ItemForm): ItemForm {
     armor_bonus: 0,
     damage: 0,
     two_handed: false,
+    weapon_class: 'melee',
+    weapon_range: 4,
     passive: false,
   };
 }
@@ -289,10 +314,48 @@ function ItemFormFields({
           </fieldset>
 
           {form.item_type === 'weapon' && (
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.two_handed} onChange={(e) => set('two_handed', e.target.checked)} />
-              Two-handed (needs both hands free)
-            </label>
+            <>
+              <div>
+                <label className="label">Weapon class</label>
+                <select
+                  className="input"
+                  value={form.weapon_class}
+                  onChange={(e) => {
+                    const weapon_class = e.target.value as 'melee' | 'range';
+                    onChange({
+                      ...form,
+                      weapon_class,
+                      two_handed: weapon_class === 'range' ? true : form.two_handed,
+                    });
+                  }}
+                >
+                  <option value="melee">Melee</option>
+                  <option value="range">Ranged (two-handed)</option>
+                </select>
+              </div>
+              {form.weapon_class === 'range' && (
+                <div>
+                  <label className="label">Range (cells)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={9}
+                    value={form.weapon_range}
+                    onChange={(e) => set('weapon_range', +e.target.value)}
+                  />
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.weapon_class === 'range' ? true : form.two_handed}
+                  disabled={form.weapon_class === 'range'}
+                  onChange={(e) => set('two_handed', e.target.checked)}
+                />
+                Two-handed (needs both hands free)
+              </label>
+            </>
           )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.passive} onChange={(e) => set('passive', e.target.checked)} />

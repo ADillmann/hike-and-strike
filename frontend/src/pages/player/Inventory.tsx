@@ -42,6 +42,9 @@ function formatStats(stats: Record<string, unknown>): string[] {
   if (stats.passive) lines.push('Passive — works from bag');
   if (stats.two_handed) lines.push('Two-handed — needs both hands');
   if (typeof stats.damage === 'number') lines.push(`Damage ${stats.damage}`);
+  if (stats.weapon_class === 'range') lines.push('Ranged weapon (two-handed)');
+  else if (stats.weapon_class === 'melee' || stats.damage) lines.push('Melee weapon');
+  if (typeof stats.range === 'number' && stats.weapon_class === 'range') lines.push(`Range ${stats.range} cells`);
   if (typeof stats.armor_bonus === 'number') lines.push(`Armor +${stats.armor_bonus}`);
   if (typeof stats.heal === 'number' && stats.heal > 0) lines.push(`Heals ${stats.heal} HP when used`);
   for (const key of ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'] as const) {

@@ -12,6 +12,13 @@ interface EventTemplate {
   is_generic: boolean;
   images: string[];
   shop_config?: ShopConfig | null;
+  battle_config?: BattleConfig | null;
+}
+
+interface BattleConfig {
+  preset?: string;
+  group_initiative_bonus?: number;
+  enemy_initiative_bonus?: number;
 }
 
 interface ShopConfig {
@@ -23,6 +30,44 @@ const defaultShopConfig = (): ShopConfig => ({
   allowed_tiers: [1],
   buy_modifier_percent: 0,
 });
+
+const defaultBattleConfig = (): BattleConfig => ({
+  preset: 'goblin_crowd',
+  group_initiative_bonus: 0,
+  enemy_initiative_bonus: 0,
+});
+
+function BattleConfigEditor({
+  config,
+  onChange,
+  presets,
+}: {
+  config: BattleConfig;
+  onChange: (config: BattleConfig) => void;
+  presets: { id: string; name: string }[];
+}) {
+  return (
+    <fieldset className="space-y-2 rounded border border-dungeon-700 p-3">
+      <legend className="px-1 text-sm font-medium text-dungeon-300">Battle settings</legend>
+      <div>
+        <label className="label">Default preset</label>
+        <select className="input" value={config.preset || ''} onChange={(e) => onChange({ ...config, preset: e.target.value })}>
+          {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="label">Group init. bonus</label>
+          <input className="input" type="number" step={0.1} value={config.group_initiative_bonus ?? 0} onChange={(e) => onChange({ ...config, group_initiative_bonus: +e.target.value })} />
+        </div>
+        <div>
+          <label className="label">Enemy init. bonus</label>
+          <input className="input" type="number" step={0.1} value={config.enemy_initiative_bonus ?? 0} onChange={(e) => onChange({ ...config, enemy_initiative_bonus: +e.target.value })} />
+        </div>
+      </div>
+    </fieldset>
+  );
+}
 
 function ShopConfigEditor({
   config,
@@ -72,7 +117,8 @@ function ShopConfigEditor({
 
 export default function EventsPage() {
   const [events, setEvents] = useState<EventTemplate[]>([]);
-  const [form, setForm] = useState({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig() });
+  const [presets, setPresets] = useState<{ id: string; name: string }[]>([]);
+  const [form, setForm] = useState({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig(), battle_config: defaultBattleConfig() });
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [editing, setEditing] = useState<EventTemplate | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -81,7 +127,7 @@ export default function EventsPage() {
 
   const load = () => api.get<EventTemplate[]>('/events').then(setEvents);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get<{ id: string; name: string }[]>('/enemies/presets').then(setPresets); }, []);
 
   const uploadImage = async (eventId: number, file: File) => {
     setError('');
@@ -117,11 +163,12 @@ export default function EventsPage() {
     try {
       const payload: Record<string, unknown> = { ...form };
       if (form.event_type !== 'shop') delete payload.shop_config;
+      if (form.event_type !== 'battle_hook') delete payload.battle_config;
       const created = await api.post<EventTemplate>('/events', payload);
       for (const file of pendingImages) {
         await uploadImage(created.id, file);
       }
-      setForm({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig() });
+      setForm({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig(), battle_config: defaultBattleConfig() });
       setPendingImages([]);
       load();
     } catch (err) {
@@ -140,6 +187,9 @@ export default function EventsPage() {
       };
       if (editing.event_type === 'shop') {
         payload.shop_config = editing.shop_config || defaultShopConfig();
+      }
+      if (editing.event_type === 'battle_hook') {
+        payload.battle_config = editing.battle_config || defaultBattleConfig();
       }
       await api.patch(`/events/${editing.id}`, payload);
       setEditing(null);
@@ -177,6 +227,13 @@ export default function EventsPage() {
             <ShopConfigEditor
               config={form.shop_config}
               onChange={(shop_config) => setForm({ ...form, shop_config })}
+            />
+          )}
+          {form.event_type === 'battle_hook' && (
+            <BattleConfigEditor
+              config={form.battle_config}
+              onChange={(battle_config) => setForm({ ...form, battle_config })}
+              presets={presets}
             />
           )}
           <div>
@@ -236,6 +293,7 @@ export default function EventsPage() {
                     ...ev,
                     images: ev.images || [],
                     shop_config: ev.shop_config || defaultShopConfig(),
+                    battle_config: ev.battle_config || defaultBattleConfig(),
                   })}>Edit</button>
                   {!ev.is_generic && (
                     <button className="btn-danger px-2 py-0.5 text-xs" onClick={() => setDeleteId(ev.id)}>Delete</button>
@@ -260,6 +318,7 @@ export default function EventsPage() {
               ...editing,
               event_type: e.target.value,
               shop_config: e.target.value === 'shop' ? (editing.shop_config || defaultShopConfig()) : editing.shop_config,
+              battle_config: e.target.value === 'battle_hook' ? (editing.battle_config || defaultBattleConfig()) : editing.battle_config,
             })}>
               {['story', 'puzzle', 'rest', 'generic', 'battle_hook', 'shop'].map((t) => (
                 <option key={t} value={t}>{t}</option>
@@ -269,6 +328,13 @@ export default function EventsPage() {
               <ShopConfigEditor
                 config={editing.shop_config || defaultShopConfig()}
                 onChange={(shop_config) => setEditing({ ...editing, shop_config })}
+              />
+            )}
+            {editing.event_type === 'battle_hook' && (
+              <BattleConfigEditor
+                config={editing.battle_config || defaultBattleConfig()}
+                onChange={(battle_config) => setEditing({ ...editing, battle_config })}
+                presets={presets}
               />
             )}
             {editing.images?.length > 0 ? (

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
+import { BattleGrid, GridActor } from '../../components/BattleGrid';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
@@ -122,6 +123,9 @@ export default function CampaignControlPage() {
     if (msg.type === 'battle_started' && msg.data && typeof msg.data === 'object') {
       const d = msg.data as { battle_id: number };
       setActiveBattleId(d.battle_id);
+    }
+    if (msg.type === 'battle_cancelled' && msg.data && typeof msg.data === 'object') {
+      setActiveBattleId(null);
     }
   });
 
@@ -305,7 +309,12 @@ export default function CampaignControlPage() {
               <AdvanceRewardBuilder party={state.party} items={items} effects={effects} onChange={setAdvanceRewards} />
             </div>
           </details>
-          <button className="btn-primary mt-2" onClick={() => setAdvanceConfirmOpen(true)}>Go to Next Event</button>
+          <button className="btn-primary mt-2" disabled={!!activeBattleId} onClick={() => setAdvanceConfirmOpen(true)}>
+            {activeBattleId ? 'Finish battle before advancing' : 'Go to Next Event'}
+          </button>
+          {activeBattleId && (
+            <p className="mt-1 text-xs text-amber-400">A battle is in progress — resolve it before advancing the campaign.</p>
+          )}
         </section>
 
         {canModifyEvents && (
@@ -446,6 +455,7 @@ export default function CampaignControlPage() {
         <BattleSetupModal
           campaignId={campaignId}
           onClose={() => setShowBattleSetup(false)}
+          onAborted={() => setActiveBattleId(null)}
           onCreated={(battleId) => {
             setShowBattleSetup(false);
             setActiveBattleId(battleId);
@@ -459,16 +469,28 @@ export default function CampaignControlPage() {
 
 interface EnemyOption { id: number; name: string }
 interface Preset { id: string; name: string }
+interface CustomEntry {
+  template_id: number;
+  name: string;
+  count: number;
+  power_scale: number;
+}
 
 function BattleSetupModal({
   campaignId,
   onClose,
   onCreated,
+  onAborted,
 }: {
   campaignId: number;
   onClose: () => void;
   onCreated: (battleId: number) => void;
+  onAborted: () => void;
 }) {
+  const [step, setStep] = useState<'config' | 'placement'>('config');
+  const [battleId, setBattleId] = useState(0);
+  const [battleState, setBattleState] = useState<{ grid: { width: number; height: number }; actors: GridActor[] } | null>(null);
+  const [encounterSummary, setEncounterSummary] = useState('');
   const [enemies, setEnemies] = useState<EnemyOption[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [mode, setMode] = useState<'preset' | 'custom'>('preset');
@@ -476,69 +498,188 @@ function BattleSetupModal({
   const [enemyId, setEnemyId] = useState(0);
   const [count, setCount] = useState(1);
   const [powerScale, setPowerScale] = useState(1);
+  const [customEntries, setCustomEntries] = useState<CustomEntry[]>([]);
   const [groupBonus, setGroupBonus] = useState(0);
   const [enemyBonus, setEnemyBonus] = useState(0);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     api.get<EnemyOption[]>('/enemies').then((e) => { setEnemies(e); if (e[0]) setEnemyId(e[0].id); });
     api.get<Preset[]>('/enemies/presets').then(setPresets);
   }, []);
 
+  const addCustomEntry = () => {
+    const picked = enemies.find((e) => e.id === enemyId);
+    if (!picked || count < 1) return;
+    setCustomEntries((prev) => [
+      ...prev,
+      { template_id: enemyId, name: picked.name, count, power_scale: powerScale },
+    ]);
+  };
+
+  const removeCustomEntry = (index: number) => {
+    setCustomEntries((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatEncounterSummary = (entries: CustomEntry[]) =>
+    entries.map((e) => `${e.count}× ${e.name}${e.power_scale !== 1 ? ` (scale ${e.power_scale})` : ''}`).join(', ');
+
   const create = async () => {
+    setError('');
+    if (mode === 'custom' && customEntries.length === 0) {
+      setError('Add at least one enemy to the encounter.');
+      return;
+    }
     const payload = mode === 'preset'
       ? { preset, group_initiative_bonus: groupBonus, enemy_initiative_bonus: enemyBonus }
       : {
-          enemies: [{ template_id: enemyId, count, power_scale: powerScale }],
+          enemies: customEntries.map(({ template_id, count: c, power_scale: ps }) => ({
+            template_id,
+            count: c,
+            power_scale: ps,
+          })),
           group_initiative_bonus: groupBonus,
           enemy_initiative_bonus: enemyBonus,
         };
-    const res = await api.post<{ id: number }>(`/battles/campaigns/${campaignId}`, payload);
-    onCreated(res.id);
+    try {
+      const res = await api.post<{ id: number; state: { grid: { width: number; height: number }; actors: GridActor[] } }>(
+        `/battles/campaigns/${campaignId}`,
+        payload,
+      );
+      setBattleId(res.id);
+      setBattleState({ grid: res.state.grid, actors: res.state.actors.map((a) => ({ ...a, position: a.position })) });
+      setEncounterSummary(
+        mode === 'preset'
+          ? (presets.find((p) => p.id === preset)?.name || preset)
+          : formatEncounterSummary(customEntries),
+      );
+      setStep('placement');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create battle');
+    }
+  };
+
+  const abortSetup = async () => {
+    if (step === 'placement' && battleId) {
+      try {
+        await api.delete(`/battles/${battleId}`);
+        onAborted();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not cancel battle');
+        return;
+      }
+    }
+    onClose();
+  };
+
+  const savePositions = async () => {
+    if (!battleState || !battleId) return;
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const a of battleState.actors) {
+      positions[a.id] = { x: a.position.x, y: a.position.y };
+    }
+    await api.patch(`/battles/${battleId}/positions`, { positions });
+  };
+
+  const onDragActor = (actorId: string, x: number, y: number) => {
+    if (!battleState) return;
+    const occupied = battleState.actors.some((a) => a.id !== actorId && a.position.x === x && a.position.y === y);
+    if (occupied) return;
+    setBattleState({
+      ...battleState,
+      actors: battleState.actors.map((a) => (a.id === actorId ? { ...a, position: { x, y } } : a)),
+    });
+  };
+
+  const finish = async () => {
+    try {
+      await savePositions();
+      onCreated(battleId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save positions');
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="card max-w-md w-full space-y-3">
+      <div className="card max-h-[90vh] w-full max-w-lg overflow-y-auto space-y-3">
         <h3 className="font-semibold text-dungeon-300">Setup Battle</h3>
-        <div className="flex gap-2">
-          <button className={`text-sm px-2 py-1 rounded ${mode === 'preset' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('preset')}>Preset</button>
-          <button className={`text-sm px-2 py-1 rounded ${mode === 'custom' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('custom')}>Custom</button>
-        </div>
-        {mode === 'preset' ? (
-          <select className="input" value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        ) : (
+        {error && <p className="text-sm text-red-400">{error}</p>}
+
+        {step === 'config' && (
           <>
-            <select className="input" value={enemyId} onChange={(e) => setEnemyId(+e.target.value)}>
-              {enemies.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'preset' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('preset')}>Preset</button>
+              <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'custom' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('custom')}>Custom</button>
+            </div>
+            {mode === 'preset' ? (
+              <select className="input" value={preset} onChange={(e) => setPreset(e.target.value)}>
+                {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            ) : (
+              <>
+                <select className="input" value={enemyId} onChange={(e) => setEnemyId(+e.target.value)}>
+                  {enemies.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label">Count</label>
+                    <input className="input" type="number" min={1} max={10} value={count} onChange={(e) => setCount(+e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Power scale</label>
+                    <input className="input" type="number" min={0.5} max={3} step={0.1} value={powerScale} onChange={(e) => setPowerScale(+e.target.value)} />
+                  </div>
+                </div>
+                <button type="button" className="btn-secondary text-sm" onClick={addCustomEntry}>Add to encounter</button>
+                {customEntries.length > 0 && (
+                  <ul className="space-y-1 rounded border border-dungeon-700 p-2 text-sm">
+                    {customEntries.map((entry, i) => (
+                      <li key={i} className="flex items-center justify-between gap-2">
+                        <span>{entry.count}× {entry.name}{entry.power_scale !== 1 ? ` (scale ${entry.power_scale})` : ''}</span>
+                        <button type="button" className="text-xs text-red-400 hover:underline" onClick={() => removeCustomEntry(i)}>Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="label">Count</label>
-                <input className="input" type="number" min={1} max={10} value={count} onChange={(e) => setCount(+e.target.value)} />
+                <label className="label">Group init. bonus</label>
+                <input className="input" type="number" step={0.1} value={groupBonus} onChange={(e) => setGroupBonus(+e.target.value)} />
               </div>
               <div>
-                <label className="label">Power scale</label>
-                <input className="input" type="number" min={0.5} max={3} step={0.1} value={powerScale} onChange={(e) => setPowerScale(+e.target.value)} />
+                <label className="label">Enemy init. bonus</label>
+                <input className="input" type="number" step={0.1} value={enemyBonus} onChange={(e) => setEnemyBonus(+e.target.value)} />
               </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" className="btn-primary" onClick={create}>Next: Placement</button>
+              <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             </div>
           </>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="label">Group init. bonus</label>
-            <input className="input" type="number" step={0.1} value={groupBonus} onChange={(e) => setGroupBonus(+e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Enemy init. bonus</label>
-            <input className="input" type="number" step={0.1} value={enemyBonus} onChange={(e) => setEnemyBonus(+e.target.value)} />
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn-primary" onClick={create}>Create Battle</button>
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-        </div>
+
+        {step === 'placement' && battleState && (
+          <>
+            {encounterSummary && (
+              <p className="text-sm text-dungeon-300">Encounter: {encounterSummary}</p>
+            )}
+            <p className="text-sm text-stone-400">Drag tokens to position the party and enemies, then continue.</p>
+            <BattleGrid
+              width={battleState.grid.width}
+              height={battleState.grid.height}
+              actors={battleState.actors}
+              draggable
+              onDragActor={onDragActor}
+            />
+            <div className="flex gap-2">
+              <button type="button" className="btn-primary" onClick={finish}>Continue to Battle</button>
+              <button type="button" className="btn-secondary" onClick={abortSetup}>Cancel</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

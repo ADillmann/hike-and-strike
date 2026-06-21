@@ -64,6 +64,7 @@ from app.services.character_stats import (
     stacks_in_inventory,
     validate_point_buy,
     weapon_attack_bonus,
+    weapon_class,
 )
 
 router = APIRouter(prefix="/characters", tags=["characters"])
@@ -500,6 +501,9 @@ def equip_item(
         item_type = inv.item_template.item_type
         stats = inv.item_template.stats or {}
         two_handed = item_type == "weapon" and stats.get("two_handed")
+
+        if item_type == "weapon" and weapon_class(inv.item_template) == "range" and not stats.get("two_handed"):
+            raise HTTPException(status_code=400, detail="Ranged weapons must be two-handed")
 
         if item_type in ("weapon", "shield"):
             if slot not in HAND_SLOTS:

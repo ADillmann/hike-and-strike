@@ -84,24 +84,83 @@ def compute_max_hp(durability: int, armor_bonus: int = 0) -> int:
     return HP_BASE + durability * HP_PER_DURABILITY + armor_bonus
 
 
-def weapon_attack_bonus(inventory_items, stats: dict) -> int:
-    weapon_damage = 0
-    relevant_stat = stats.get("strength", STAT_DEFAULT)
+DEFAULT_WEAPON_RANGE = 4
+
+
+def weapon_class(item_template) -> str:
+    if not item_template or item_template.item_type != "weapon":
+        return "melee"
+    return (item_template.stats or {}).get("weapon_class", "melee")
+
+
+def is_ranged_weapon(inventory_item) -> bool:
+    if not inventory_item or not inventory_item.item_template:
+        return False
+    if inventory_item.item_template.item_type != "weapon":
+        return False
+    return weapon_class(inventory_item.item_template) == "range"
+
+
+def equipped_weapon_profile(inventory_items, stats: dict) -> dict:
+    hand_items = []
     for inv in inventory_items:
         if not inv.equipped_slot or not inv.item_template:
             continue
         slot = normalize_equipped_slot(inv.equipped_slot)
         if slot not in HAND_SLOTS:
             continue
-        if inv.item_template.item_type not in ("weapon", "shield"):
+        if inv.item_template.item_type in ("weapon", "shield"):
+            hand_items.append(inv)
+
+    for inv in hand_items:
+        if inv.item_template.item_type != "weapon":
             continue
-        damage = inv.item_template.stats.get("damage", 0)
-        if inv.item_template.item_type == "shield":
-            damage = max(damage, 1)  # shields may add minor bash damage
-        weapon_damage = max(weapon_damage, damage)
-        if inv.item_template.stats.get("finesse"):
-            relevant_stat = max(relevant_stat, stats.get("dexterity", STAT_DEFAULT))
-    return weapon_damage + relevant_stat // 3
+        if weapon_class(inv.item_template) != "range":
+            continue
+        ws = inv.item_template.stats or {}
+        damage = int(ws.get("damage", 0))
+        dex = stats.get("dexterity", STAT_DEFAULT)
+        weapon_range = int(ws.get("range", DEFAULT_WEAPON_RANGE))
+        return {
+            "can_melee": False,
+            "can_ranged": True,
+            "melee_attack_bonus": 0,
+            "ranged_attack_bonus": damage + dex // 3,
+            "weapon_range": weapon_range,
+        }
+
+    weapon_damage = 0
+    has_shield = False
+    relevant_stat = stats.get("strength", STAT_DEFAULT)
+    for inv in hand_items:
+        tmpl = inv.item_template
+        if tmpl.item_type == "shield":
+            has_shield = True
+            damage = max(int(tmpl.stats.get("damage", 0)), 1)
+            weapon_damage = max(weapon_damage, damage)
+            continue
+        if tmpl.item_type == "weapon" and weapon_class(tmpl) == "melee":
+            damage = int(tmpl.stats.get("damage", 0))
+            weapon_damage = max(weapon_damage, damage)
+            if tmpl.stats.get("finesse"):
+                relevant_stat = max(relevant_stat, stats.get("dexterity", STAT_DEFAULT))
+
+    if weapon_damage > 0 or has_shield:
+        melee_bonus = weapon_damage + relevant_stat // 3
+    else:
+        melee_bonus = max(1, stats.get("strength", STAT_DEFAULT) // 3)
+
+    return {
+        "can_melee": True,
+        "can_ranged": False,
+        "melee_attack_bonus": melee_bonus,
+        "ranged_attack_bonus": 0,
+        "weapon_range": DEFAULT_WEAPON_RANGE,
+    }
+
+
+def weapon_attack_bonus(inventory_items, stats: dict) -> int:
+    return equipped_weapon_profile(inventory_items, stats)["melee_attack_bonus"]
 
 
 def effective_stats(base_stats: dict, inventory_items, temporary_effects) -> dict[str, int]:

@@ -6,8 +6,9 @@ from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
 from app.services.currency import get_system_currency_settings
 
 BASE_ITEMS = [
-    ("Iron Sword", "weapon", 1, {"damage": 4}, "A reliable blade.", 120),
-    ("Steel Longsword", "weapon", 2, {"damage": 6, "two_handed": True}, "A heavy two-handed sword.", 350),
+    ("Iron Sword", "weapon", 1, {"damage": 4, "weapon_class": "melee"}, "A reliable blade.", 120),
+    ("Steel Longsword", "weapon", 2, {"damage": 6, "two_handed": True, "weapon_class": "melee"}, "A heavy two-handed sword.", 350),
+    ("Short Bow", "weapon", 1, {"damage": 3, "weapon_class": "range", "two_handed": True, "range": 4}, "A simple hunting bow.", 140),
     ("Leather Cap", "head", 1, {"armor_bonus": 1}, "Simple head protection.", 80),
     ("Iron Helm", "head", 2, {"armor_bonus": 2}, "A sturdy helmet.", 200),
     ("Wooden Shield", "shield", 1, {"armor_bonus": 1}, "Basic shield for the off hand.", 100),

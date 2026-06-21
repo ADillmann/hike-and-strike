@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { ShopModal } from '../../components/shop/ShopModal';
@@ -23,10 +24,23 @@ interface CampaignView {
 }
 
 export default function CampaignPage() {
+  const navigate = useNavigate();
   const [data, setData] = useState<CampaignView>({ active: false });
   const [campaignId, setCampaignId] = useState<number | null>(null);
   const [myCharacter, setMyCharacter] = useState<Character | null>(null);
   const [shopOpen, setShopOpen] = useState(false);
+  const [activeBattleId, setActiveBattleId] = useState<number | null>(null);
+
+  const goToBattle = useCallback((battleId: number) => {
+    navigate(`/battle/${battleId}`);
+  }, [navigate]);
+
+  const checkActiveBattle = useCallback(() => {
+    if (!campaignId) return;
+    api.get<{ active: boolean; battle_id?: number }>(`/battles/campaigns/${campaignId}/active`)
+      .then((b) => setActiveBattleId(b.active && b.battle_id ? b.battle_id : null))
+      .catch(() => setActiveBattleId(null));
+  }, [campaignId]);
 
   const load = useCallback(() => {
     api.get<CampaignView & { campaign_id?: number }>('/player/campaign/active').then((d) => {
@@ -38,12 +52,39 @@ export default function CampaignPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    checkActiveBattle();
+  }, [checkActiveBattle]);
+
+  useEffect(() => {
+    if (data.current_node?.event.event_type === 'battle_hook' && activeBattleId) {
+      goToBattle(activeBattleId);
+    }
+  }, [data.current_node?.event.event_type, activeBattleId, goToBattle]);
+
   useCampaignSocket(campaignId, (msg) => {
     if (msg.type === 'campaign_state' || msg.type === 'event_advanced') load();
     if (msg.type === 'character_updated') load();
     if (msg.type === 'battle_started' && msg.data && typeof msg.data === 'object' && 'battle_id' in (msg.data as object)) {
       const battleId = (msg.data as { battle_id: number }).battle_id;
-      window.location.href = `/battle/${battleId}`;
+      setActiveBattleId(battleId);
+      goToBattle(battleId);
+    }
+    if (msg.type === 'battle_cancelled') {
+      setActiveBattleId(null);
+      checkActiveBattle();
+    }
+    if (msg.type === 'battle_updated' && msg.data && typeof msg.data === 'object' && 'battle_id' in (msg.data as object)) {
+      const d = msg.data as { battle_id: number; state?: { status?: string } };
+      const battleStatus = d.state?.status;
+      if (battleStatus === 'active' || battleStatus === 'pending') {
+        setActiveBattleId(d.battle_id);
+        goToBattle(d.battle_id);
+      } else if (battleStatus === 'completed') {
+        setActiveBattleId(null);
+        checkActiveBattle();
+        load();
+      }
     }
   });
 
@@ -71,9 +112,18 @@ export default function CampaignPage() {
             </div>
           )}
           {data.current_node?.event.event_type === 'battle_hook' && (
-            <p className="mt-4 rounded border border-dungeon-500 p-3 text-dungeon-300">
-              A battle is coming — wait for the Master to start combat.
-            </p>
+            <div className="mt-4 rounded border border-dungeon-500 p-3 text-dungeon-300">
+              {activeBattleId ? (
+                <>
+                  <p className="mb-2">Battle is ready — opening combat…</p>
+                  <button type="button" className="btn-primary text-sm" onClick={() => goToBattle(activeBattleId)}>
+                    Join Battle
+                  </button>
+                </>
+              ) : (
+                <p>A battle is coming — wait for the Master to set up combat.</p>
+              )}
+            </div>
           )}
           {data.current_node?.event.event_type === 'shop' && (
             <div className="mt-4 flex flex-wrap gap-2">

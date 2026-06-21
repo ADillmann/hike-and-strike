@@ -37,3 +37,6 @@ build:
 stop:
 	@fuser -k $(PORT)/tcp 2>/dev/null && echo "Stopped process on port $(PORT)" || echo "Nothing listening on port $(PORT)"
 	@fuser -k 5173/tcp 2>/dev/null && echo "Stopped process on port 5173" || true
+
+test:
+	cd backend && .venv/bin/pip install -q pytest && .venv/bin/pytest tests/ -q
