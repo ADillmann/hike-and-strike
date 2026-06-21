@@ -15,15 +15,12 @@ from app.services.campaign_engine import (
     campaign_state_payload,
     clear_event_effects_for_party,
     get_campaign_party,
+    payload_has_rewards_or_punishments,
 )
-from app.services.character_progression import campaign_has_active_battle
+from app.services.character_progression import REWARDS_BLOCKED_DURING_BATTLE_MSG, campaign_has_active_battle
 from app.websocket.manager import ws_manager
 
 router = APIRouter(prefix="/campaigns", tags=["campaign_runtime"])
-
-
-def _payload_has_xp(rewards: dict | None) -> bool:
-    return bool(rewards and rewards.get("xp"))
 
 
 @router.get("/{campaign_id}/state")
@@ -62,8 +59,6 @@ async def advance_campaign(
         apply_rest = False
 
     if payload.rewards or payload.punishments:
-        if _payload_has_xp(payload.rewards) and campaign_has_active_battle(db, campaign_id):
-            raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
         try:
             apply_rewards_and_punishments(
                 db, campaign, payload.rewards, payload.punishments, master.id
@@ -128,8 +123,10 @@ async def apply_rewards(
     campaign = db.get(Campaign, campaign_id)
     if not campaign or campaign.master_id != master.id:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    if _payload_has_xp(payload.rewards) and campaign_has_active_battle(db, campaign_id):
-        raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
+    if campaign_has_active_battle(db, campaign_id) and payload_has_rewards_or_punishments(
+        payload.rewards, payload.punishments
+    ):
+        raise HTTPException(status_code=409, detail=REWARDS_BLOCKED_DURING_BATTLE_MSG)
     try:
         apply_rewards_and_punishments(db, campaign, payload.rewards, payload.punishments, master.id)
     except ValueError as exc:

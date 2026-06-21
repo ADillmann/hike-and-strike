@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, Character } from '../../api/client';
+import { api, Character, REWARDS_BLOCKED_DURING_BATTLE } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
 import { BattleGrid, GridActor } from '../../components/BattleGrid';
@@ -301,6 +301,7 @@ export default function CampaignControlPage() {
           items={items}
           effects={effects}
           onApplied={load}
+          rewardsBlocked={!!activeBattleId}
         />
 
         <section className="card lg:col-span-2">
@@ -337,7 +338,13 @@ export default function CampaignControlPage() {
             <summary className="cursor-pointer text-sm text-dungeon-400">Attach rewards/punishments to this advance</summary>
             <div className="mt-2 space-y-2 rounded border border-dungeon-600 p-2 text-sm">
               <p className="text-xs text-stone-500">These will be logged in event history when you advance.</p>
-              <AdvanceRewardBuilder party={state.party} items={items} effects={effects} onChange={setAdvanceRewards} />
+              <AdvanceRewardBuilder
+                party={state.party}
+                items={items}
+                effects={effects}
+                rewardsBlocked={!!activeBattleId}
+                onChange={setAdvanceRewards}
+              />
             </div>
           </details>
           <button className="btn-primary mt-2" disabled={!!activeBattleId} onClick={() => setAdvanceConfirmOpen(true)}>
@@ -766,11 +773,13 @@ function AdvanceRewardBuilder({
   items,
   effects,
   onChange,
+  rewardsBlocked = false,
 }: {
   party: { id: number; name: string; current_hp?: number; max_hp?: number }[];
   items: Item[];
   effects: EffectTemplate[];
   onChange: (payload: RewardsPayload) => void;
+  rewardsBlocked?: boolean;
 }) {
   const [rewardType, setRewardType] = useState<'item' | 'random' | 'hp' | 'xp' | 'currency' | 'effect'>('item');
   const [charId, setCharId] = useState(party[0]?.id || 0);
@@ -808,6 +817,10 @@ function AdvanceRewardBuilder({
   const selectedRandomMember = party.find((p) => p.id === randomCharId);
 
   useEffect(() => {
+    if (rewardsBlocked) {
+      onChange({});
+      return;
+    }
     if (rewardType === 'item' && charId && itemId) {
       onChange({ rewards: { items: [{ character_id: charId, item_template_id: itemId }] } });
       return;
@@ -909,10 +922,15 @@ function AdvanceRewardBuilder({
     effectTemplateId,
     party,
     onChange,
+    rewardsBlocked,
   ]);
 
   return (
     <div className="space-y-2">
+      {rewardsBlocked && (
+        <p className="text-sm text-amber-300">{REWARDS_BLOCKED_DURING_BATTLE}</p>
+      )}
+      <fieldset disabled={rewardsBlocked} className={`space-y-2 ${rewardsBlocked ? 'opacity-60' : ''}`}>
       <select className="input" value={rewardType} onChange={(e) => setRewardType(e.target.value as typeof rewardType)}>
         <option value="item">Grant item</option>
         <option value="random">Random tier loot</option>
@@ -1081,6 +1099,7 @@ function AdvanceRewardBuilder({
           </select>
         </>
       )}
+      </fieldset>
     </div>
   );
 }

@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.game.constants import STAT_CAP, STAT_NAMES, STAT_POINTS_PER_LEVEL, XP_PER_LEVEL_BASE
 from app.models import Battle, Campaign, Character, StatChangeLog
 
+REWARDS_BLOCKED_DURING_BATTLE_MSG = (
+    "No rewards or punishments can be granted during an active battle. Finish the battle first."
+)
+
 
 def xp_to_next_level(level: int) -> int:
     return level * XP_PER_LEVEL_BASE

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api } from '../../api/client';
+import { api, REWARDS_BLOCKED_DURING_BATTLE, type Character, type UserInfo } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Layout, StatEditor } from '../../components/Layout';
-import type { Character, UserInfo } from '../../api/client';
 
 interface StatLog {
   id: number;
@@ -76,11 +75,17 @@ export default function UsersPage() {
 
   const grantXp = async () => {
     if (!selectedChar || grantXpAmount <= 0) return;
-    const updated = await api.post<Character>(`/characters/${selectedChar.id}/grant-xp`, { amount: grantXpAmount });
-    setSelectedChar(updated);
-    setEditStats({ ...updated.stats, current_hp: updated.current_hp, max_hp: updated.max_hp });
-    setPendingGrantXp(false);
-    load();
+    setError('');
+    try {
+      const updated = await api.post<Character>(`/characters/${selectedChar.id}/grant-xp`, { amount: grantXpAmount });
+      setSelectedChar(updated);
+      setEditStats({ ...updated.stats, current_hp: updated.current_hp, max_hp: updated.max_hp });
+      setPendingGrantXp(false);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not grant XP');
+      setPendingGrantXp(false);
+    }
   };
 
   const releaseStat = async () => {
@@ -204,6 +209,11 @@ export default function UsersPage() {
                 Level {selectedChar.level ?? 1} — XP {selectedChar.xp ?? 0} / {selectedChar.xp_to_next_level ?? 100}
                 {' '}— Free stat points: {selectedChar.stat_points_free ?? 0}
               </p>
+              {selectedChar.in_active_battle && (
+                <p className="rounded border border-amber-800/60 bg-amber-950/30 p-2 text-sm text-amber-300">
+                  {REWARDS_BLOCKED_DURING_BATTLE}
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <input
                   className="input w-28"
@@ -211,8 +221,14 @@ export default function UsersPage() {
                   min={1}
                   value={grantXpAmount}
                   onChange={(e) => setGrantXpAmount(+e.target.value)}
+                  disabled={selectedChar.in_active_battle}
                 />
-                <button type="button" className="btn-secondary" onClick={() => setPendingGrantXp(true)} disabled={grantXpAmount <= 0}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setPendingGrantXp(true)}
+                  disabled={grantXpAmount <= 0 || selectedChar.in_active_battle}
+                >
                   Grant XP
                 </button>
               </div>

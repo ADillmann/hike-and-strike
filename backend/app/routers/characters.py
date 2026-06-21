@@ -41,7 +41,9 @@ from app.schemas import (
     UseSkillRequest,
 )
 from app.services.character_progression import (
+    REWARDS_BLOCKED_DURING_BATTLE_MSG,
     allocate_stat_point,
+    character_in_active_battle,
     grant_xp,
     progression_fields,
     release_stat_point,
@@ -172,6 +174,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
             }
             for e in character.temporary_effects
         ],
+        in_active_battle=character_in_active_battle(db, character.id),
     )
 
 
@@ -421,7 +424,7 @@ async def grant_character_xp(
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
     if character_in_active_battle(db, character.id):
-        raise HTTPException(status_code=409, detail="Cannot grant XP during an active battle")
+        raise HTTPException(status_code=409, detail=REWARDS_BLOCKED_DURING_BATTLE_MSG)
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="XP amount must be positive")
     grant_xp(db, character, payload.amount, master.id, payload.campaign_id)

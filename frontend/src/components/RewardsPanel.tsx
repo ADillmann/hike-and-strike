@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, REWARDS_BLOCKED_DURING_BATTLE } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
 
 export interface RewardsPayload {
@@ -57,6 +57,7 @@ export function RewardsPanel({
   effects,
   onApplied,
   compact,
+  rewardsBlocked = false,
 }: {
   campaignId: number;
   party: PartyMember[];
@@ -64,6 +65,7 @@ export function RewardsPanel({
   effects: EffectTemplate[];
   onApplied?: () => void;
   compact?: boolean;
+  rewardsBlocked?: boolean;
 }) {
   const [tab, setTab] = useState<'item' | 'random' | 'buff' | 'debuff' | 'effect' | 'hp' | 'xp' | 'currency' | 'remove'>('item');
   const [rewardCharId, setRewardCharId] = useState(0);
@@ -91,6 +93,7 @@ export function RewardsPanel({
   const [removeCharId, setRemoveCharId] = useState(0);
   const [removeInvId, setRemoveInvId] = useState(0);
   const [charInventory, setCharInventory] = useState<InvItem[]>([]);
+  const [applyError, setApplyError] = useState('');
 
   useEffect(() => {
     if (party[0]) {
@@ -114,8 +117,14 @@ export function RewardsPanel({
   }, [removeCharId]);
 
   const apply = async (payload: RewardsPayload) => {
-    await api.post(`/campaigns/${campaignId}/rewards`, payload);
-    onApplied?.();
+    setApplyError('');
+    try {
+      await api.post(`/campaigns/${campaignId}/rewards`, payload);
+      onApplied?.();
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : 'Could not apply rewards');
+      throw err;
+    }
   };
 
   const grantItem = async () => {
@@ -366,34 +375,38 @@ export function RewardsPanel({
     if (!pendingConfirm) return;
     const { action } = pendingConfirm;
     setPendingConfirm(null);
-    switch (action) {
-      case 'item':
-        await grantItem();
-        break;
-      case 'random':
-        await grantRandom();
-        break;
-      case 'buff':
-        await grantBuff();
-        break;
-      case 'debuff':
-        await grantDebuff();
-        break;
-      case 'hp':
-        await applyHpChange();
-        break;
-      case 'xp':
-        await grantXp();
-        break;
-      case 'currency':
-        await applyCurrency();
-        break;
-      case 'effect':
-        await grantEffect();
-        break;
-      case 'remove':
-        await removeItem();
-        break;
+    try {
+      switch (action) {
+        case 'item':
+          await grantItem();
+          break;
+        case 'random':
+          await grantRandom();
+          break;
+        case 'buff':
+          await grantBuff();
+          break;
+        case 'debuff':
+          await grantDebuff();
+          break;
+        case 'hp':
+          await applyHpChange();
+          break;
+        case 'xp':
+          await grantXp();
+          break;
+        case 'currency':
+          await applyCurrency();
+          break;
+        case 'effect':
+          await grantEffect();
+          break;
+        case 'remove':
+          await removeItem();
+          break;
+      }
+    } catch {
+      // applyError is set in apply()
     }
   };
 
@@ -412,6 +425,13 @@ export function RewardsPanel({
   return (
     <div className={compact ? '' : 'card'}>
       {!compact && <h2 className="mb-2 font-semibold text-dungeon-300">Rewards & Punishments</h2>}
+      {rewardsBlocked && (
+        <p className="mb-2 rounded border border-amber-800/60 bg-amber-950/30 p-2 text-sm text-amber-300">
+          {REWARDS_BLOCKED_DURING_BATTLE}
+        </p>
+      )}
+      {applyError && <p className="mb-2 text-sm text-red-400">{applyError}</p>}
+      <fieldset disabled={rewardsBlocked} className={rewardsBlocked ? 'opacity-60' : undefined}>
       <div className="mb-2 flex flex-wrap gap-1">
         {tabs.map((t) => (
           <button
@@ -599,6 +619,8 @@ export function RewardsPanel({
           </button>
         </div>
       )}
+
+      </fieldset>
 
       {pendingConfirm && (
         <ConfirmDialog

@@ -1,3 +1,6 @@
+export const REWARDS_BLOCKED_DURING_BATTLE =
+  'No rewards or punishments can be granted during an active battle. Finish the battle first.';
+
 const API = '/api';
 
 export function getToken(): string | null {
@@ -25,7 +28,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, { ...options, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Request failed');
+    const detail = err.detail;
+    const message =
+      typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || 'Request failed'
+          : 'Request failed';
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -65,6 +75,7 @@ export interface Character {
   stat_raise_costs?: Record<string, number>;
   wallet_copper?: number;
   wallet_display?: string;
+  in_active_battle?: boolean;
   effective_stats?: Record<string, number>;
   attack_bonus?: number;
   username?: string;

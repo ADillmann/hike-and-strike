@@ -17,8 +17,22 @@ from app.models import (
     TemporaryEffect,
 )
 from app.services.character_stats import armor_bonus_from_inventory, compute_max_hp, stacks_in_inventory
-from app.services.character_progression import campaign_has_active_battle, grant_xp, progression_fields
+from app.services.character_progression import (
+    REWARDS_BLOCKED_DURING_BATTLE_MSG,
+    campaign_has_active_battle,
+    grant_xp,
+    progression_fields,
+)
 from app.websocket.manager import ws_manager
+
+
+def payload_has_rewards_or_punishments(rewards: dict | None, punishments: dict | None) -> bool:
+    for block in (rewards, punishments):
+        if not isinstance(block, dict):
+            continue
+        if any(block.values()):
+            return True
+    return False
 
 
 def get_campaign_party(db: Session, campaign: Campaign) -> list[Character]:
@@ -161,6 +175,9 @@ def apply_rewards_and_punishments(
     punishments: dict | None,
     master_id: int,
 ) -> None:
+    if campaign_has_active_battle(db, campaign.id) and payload_has_rewards_or_punishments(rewards, punishments):
+        raise ValueError(REWARDS_BLOCKED_DURING_BATTLE_MSG)
+
     party_ids = [c.id for c in get_campaign_party(db, campaign)]
 
     def _targets(entry: dict, *, default_party: bool = False) -> list[int]:
@@ -174,8 +191,6 @@ def apply_rewards_and_punishments(
         return list(party_ids) if default_party else []
 
     if rewards and rewards.get("xp"):
-        if campaign_has_active_battle(db, campaign.id):
-            raise ValueError("Cannot grant XP during an active battle")
         for entry in rewards.get("xp", []):
             amount = entry.get("amount", 0)
             if not isinstance(amount, (int, float)) or amount <= 0:

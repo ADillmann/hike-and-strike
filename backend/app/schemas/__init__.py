@@ -142,6 +142,7 @@ class CharacterOut(BaseModel):
     skills: list[dict[str, Any]] = []
     inventory: list[dict[str, Any]] = []
     temporary_effects: list[dict[str, Any]] = []
+    in_active_battle: bool = False
 
     class Config:
         from_attributes = True
