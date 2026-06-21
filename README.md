@@ -13,8 +13,9 @@ Browser-based tabletop RPG for local network play. Master organizes campaigns; p
 
 ### 1. Install dependencies
 
+From the **hike-and-strike** repository root:
+
 ```bash
-cd /home/a2775/playground/hike-and-strike
 make install
 ```
 
