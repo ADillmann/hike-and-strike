@@ -465,6 +465,8 @@ class BattleCreateRequest(BaseModel):
     preset: str | None = None
     group_initiative_bonus: float = 0.0
     enemy_initiative_bonus: float = 0.0
+    grid_width: int | None = Field(default=None, ge=5, le=9)
+    grid_height: int | None = Field(default=None, ge=5, le=9)
 
 
 class BattleCell(BaseModel):

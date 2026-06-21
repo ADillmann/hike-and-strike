@@ -21,10 +21,47 @@ GUARD_MAX_STEPS = 2
 DEFAULT_MELEE_RANGE = 1
 DEFAULT_RANGE_DISTANCE = 4
 PREBATTLE_INIT_THRESHOLD = 14
+MIN_BATTLE_GRID = 5
+MAX_BATTLE_GRID = 9
 
 
 def grid_size(party_size: int) -> int:
-    return max(5, min(9, party_size + 1))
+    return max(MIN_BATTLE_GRID, min(MAX_BATTLE_GRID, party_size + 1))
+
+
+def default_grid_dimensions(party_size: int) -> tuple[int, int]:
+    s = grid_size(party_size)
+    return s, s
+
+
+def validate_grid_dimension(value: int, axis: str) -> str | None:
+    if value < MIN_BATTLE_GRID or value > MAX_BATTLE_GRID:
+        return f"Grid {axis} must be between {MIN_BATTLE_GRID} and {MAX_BATTLE_GRID}"
+    return None
+
+
+def validate_grid_dimensions(width: int | None, height: int | None) -> str | None:
+    if width is not None:
+        err = validate_grid_dimension(width, "width")
+        if err:
+            return err
+    if height is not None:
+        err = validate_grid_dimension(height, "height")
+        if err:
+            return err
+    return None
+
+
+def resolve_grid_dimensions(
+    party_size: int,
+    width: int | None = None,
+    height: int | None = None,
+) -> tuple[int, int]:
+    default_w, default_h = default_grid_dimensions(party_size)
+    return (
+        width if width is not None else default_w,
+        height if height is not None else default_h,
+    )
 
 
 def actor_pos(actor: dict) -> Pos:

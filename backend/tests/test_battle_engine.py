@@ -12,7 +12,7 @@ from app.services.battle_engine import (
     start_battle,
     update_battle_positions,
 )
-from app.services.battle_geometry import actor_pos, apply_positions
+from app.services.battle_geometry import actor_pos, apply_positions, default_placement, resolve_grid_dimensions
 
 
 def _minimal_state(
@@ -119,6 +119,26 @@ def test_update_battle_positions_with_obstacles():
     }
     _, err_msg = update_battle_positions(state, bad_positions, terrain_cells=terrain)
     assert "blocked by terrain" in err_msg
+
+
+def test_custom_grid_dimensions_place_actors_in_bounds():
+    gw, gh = resolve_grid_dimensions(3, 7, 5)
+    assert (gw, gh) == (7, 5)
+    actors = [
+        {"id": "p1", "type": "player", "name": "Hero", "position": {"x": 0, "y": 0}},
+        {"id": "e1", "type": "enemy", "name": "Goblin", "position": {"x": 0, "y": 0}},
+        {"id": "e2", "type": "enemy", "name": "Goblin King", "position": {"x": 0, "y": 0}},
+    ]
+    default_placement(actors, gw, gh)
+    for actor in actors:
+        pos = actor["position"]
+        assert 0 <= pos["x"] < gw
+        assert 0 <= pos["y"] < gh
+
+
+def test_default_grid_dimensions_from_party_size():
+    gw, gh = resolve_grid_dimensions(8)
+    assert (gw, gh) == (9, 9)
 
 
 def test_prebattle_move_eligibility():

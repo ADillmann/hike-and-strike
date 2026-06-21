@@ -14,10 +14,14 @@ from app.services.battle_geometry import (
     can_melee_attack,
     can_range_attack,
     default_placement,
+    default_grid_dimensions,
     grid_size,
     line_of_sight,
     reachable_cells,
     reachable_charge_cells,
+    resolve_grid_dimensions,
+    validate_grid_dimension,
+    validate_grid_dimensions,
     validate_blocked_cells,
     validate_positions,
     validate_terrain_cells,
@@ -34,6 +38,26 @@ def test_grid_size_formula():
     assert grid_size(5) == 6
     assert grid_size(8) == 9
     assert grid_size(12) == 9
+
+
+def test_default_grid_dimensions():
+    assert default_grid_dimensions(3) == (5, 5)
+    assert default_grid_dimensions(8) == (9, 9)
+
+
+def test_resolve_grid_dimensions_defaults_and_overrides():
+    assert resolve_grid_dimensions(3) == (5, 5)
+    assert resolve_grid_dimensions(3, 7, 5) == (7, 5)
+    assert resolve_grid_dimensions(3, None, 6) == (5, 6)
+    assert resolve_grid_dimensions(3, 8, None) == (8, 5)
+
+
+def test_validate_grid_dimensions_bounds():
+    assert validate_grid_dimensions(5, 9) is None
+    assert validate_grid_dimensions(None, 7) is None
+    assert validate_grid_dimension(4, "width") == "Grid width must be between 5 and 9"
+    assert validate_grid_dimension(10, "height") == "Grid height must be between 5 and 9"
+    assert validate_grid_dimensions(5, 10) == "Grid height must be between 5 and 9"
 
 
 def test_bfs_path_around_blocker():

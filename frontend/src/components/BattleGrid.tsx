@@ -38,6 +38,13 @@ export function cycleTerrainType(current: TerrainType | undefined): TerrainType 
   return TERRAIN_CYCLE[current ?? 'empty'];
 }
 
+export const MIN_BATTLE_GRID = 5;
+export const MAX_BATTLE_GRID = 9;
+
+export function suggestedGridSize(partySize: number): number {
+  return Math.max(MIN_BATTLE_GRID, Math.min(MAX_BATTLE_GRID, partySize + 1));
+}
+
 /** Short label for grid cells (e.g. "Bandit A" → "Ban·A", "Goblin B" → "Gob·B"). */
 export function gridTokenLabel(name: string): string {
   const letterMatch = name.match(/^(.+?)\s+([A-Z])$/);

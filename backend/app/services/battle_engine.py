@@ -24,7 +24,7 @@ from app.services.battle_geometry import (
     cells_in_radius,
     chebyshev_distance,
     default_placement,
-    grid_size,
+    resolve_grid_dimensions,
     is_adjacent,
     line_of_sight,
     pick_enemy_charge_cell,
@@ -158,13 +158,21 @@ def build_battle_state(
     enemy_initiative_bonus: float = 0.0,
     preset: str | None = None,
     battle_config: dict | None = None,
+    grid_width: int | None = None,
+    grid_height: int | None = None,
 ) -> dict[str, Any]:
     actors: list[dict[str, Any]] = []
     group_size = len(party)
     enemy_count = sum(s.get("count", 1) for s in enemy_specs)
     total_combatants = max(1, group_size + enemy_count)
-    gs = grid_size(group_size)
     cfg = battle_config or {}
+    cfg_width = cfg.get("grid_width")
+    cfg_height = cfg.get("grid_height")
+    gw, gh = resolve_grid_dimensions(
+        group_size,
+        cfg_width if cfg_width is not None else grid_width,
+        cfg_height if cfg_height is not None else grid_height,
+    )
     gi_bonus = group_initiative_bonus + float(cfg.get("group_initiative_bonus", 0) or 0)
     en_bonus = enemy_initiative_bonus + float(cfg.get("enemy_initiative_bonus", 0) or 0)
 
@@ -253,15 +261,15 @@ def build_battle_state(
             })
 
     _assert_unique_actor_ids(actors)
-    default_placement(actors, gs, gs, preset=preset)
+    default_placement(actors, gw, gh, preset=preset)
     eligible_prebattle = [a["id"] for a in actors if a["type"] == "player" and a.get("prebattle_eligible") and a["alive"]]
 
     return {
         "status": "pending",
         "phase": "setup" if not eligible_prebattle else "prebattle",
         "grid": {
-            "width": gs,
-            "height": gs,
+            "width": gw,
+            "height": gh,
             "terrain_cells": _initial_terrain_cells(cfg),
         },
         "group_initiative_bonus": gi_bonus,

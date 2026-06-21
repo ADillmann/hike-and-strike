@@ -12,6 +12,7 @@ from app.schemas import (
     BattlePositionsUpdate,
     PrebattleMoveRequest,
 )
+from app.services.battle_geometry import validate_grid_dimensions
 from app.services.battle_presets import resolve_preset_enemy_specs
 from app.services.battle_engine import (
     apply_prebattle_move,
@@ -159,6 +160,10 @@ async def create_battle(
             preset = battle_config["preset"]
             enemy_specs = _resolve_enemy_specs(db, BattleCreateRequest(preset=preset))
 
+    grid_err = validate_grid_dimensions(payload.grid_width, payload.grid_height)
+    if grid_err:
+        raise HTTPException(status_code=400, detail=grid_err)
+
     state = build_battle_state(
         db,
         party,
@@ -167,6 +172,8 @@ async def create_battle(
         enemy_initiative_bonus=ei,
         preset=preset,
         battle_config=battle_config,
+        grid_width=payload.grid_width,
+        grid_height=payload.grid_height,
     )
 
     battle = Battle(campaign_id=campaign_id, status="pending", state_json=state)

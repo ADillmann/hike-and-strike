@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character, REWARDS_BLOCKED_DURING_BATTLE } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
-import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, normalizeTerrainCells, TerrainCell } from '../../components/BattleGrid';
+import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, MAX_BATTLE_GRID, MIN_BATTLE_GRID, normalizeTerrainCells, suggestedGridSize, TerrainCell } from '../../components/BattleGrid';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
@@ -492,6 +492,7 @@ export default function CampaignControlPage() {
       {showBattleSetup && (
         <BattleSetupModal
           campaignId={campaignId}
+          partySize={state.party.length}
           onClose={() => setShowBattleSetup(false)}
           onAborted={() => setActiveBattleId(null)}
           onCreated={(battleId) => {
@@ -516,16 +517,20 @@ interface CustomEntry {
 
 function BattleSetupModal({
   campaignId,
+  partySize,
   onClose,
   onCreated,
   onAborted,
 }: {
   campaignId: number;
+  partySize: number;
   onClose: () => void;
   onCreated: (battleId: number) => void;
   onAborted: () => void;
 }) {
+  const suggested = suggestedGridSize(partySize);
   const [step, setStep] = useState<'config' | 'placement'>('config');
+  const [configTab, setConfigTab] = useState<'encounter' | 'grid'>('encounter');
   const [battleId, setBattleId] = useState(0);
   const [battleState, setBattleState] = useState<{
     grid: { width: number; height: number; terrain_cells?: TerrainCell[]; blocked_cells?: { x: number; y: number }[] };
@@ -543,7 +548,15 @@ function BattleSetupModal({
   const [customEntries, setCustomEntries] = useState<CustomEntry[]>([]);
   const [groupBonus, setGroupBonus] = useState(0);
   const [enemyBonus, setEnemyBonus] = useState(0);
+  const [gridWidth, setGridWidth] = useState(suggested);
+  const [gridHeight, setGridHeight] = useState(suggested);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const size = suggestedGridSize(partySize);
+    setGridWidth(size);
+    setGridHeight(size);
+  }, [partySize]);
 
   useEffect(() => {
     api.get<EnemyOption[]>('/enemies').then((e) => { setEnemies(e); if (e[0]) setEnemyId(e[0].id); });
@@ -572,8 +585,9 @@ function BattleSetupModal({
       setError('Add at least one enemy to the encounter.');
       return;
     }
+    const gridFields = { grid_width: gridWidth, grid_height: gridHeight };
     const payload = mode === 'preset'
-      ? { preset, group_initiative_bonus: groupBonus, enemy_initiative_bonus: enemyBonus }
+      ? { preset, group_initiative_bonus: groupBonus, enemy_initiative_bonus: enemyBonus, ...gridFields }
       : {
           enemies: customEntries.map(({ template_id, count: c, power_scale: ps }) => ({
             template_id,
@@ -582,6 +596,7 @@ function BattleSetupModal({
           })),
           group_initiative_bonus: groupBonus,
           enemy_initiative_bonus: enemyBonus,
+          ...gridFields,
         };
     try {
       const res = await api.post<{ id: number; state: { grid: { width: number; height: number; terrain_cells?: TerrainCell[]; blocked_cells?: { x: number; y: number }[] }; actors: GridActor[] } }>(
@@ -683,51 +698,100 @@ function BattleSetupModal({
         {step === 'config' && (
           <>
             <div className="flex gap-2">
-              <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'preset' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('preset')}>Preset</button>
-              <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'custom' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('custom')}>Custom</button>
+              <button type="button" className={`text-sm px-2 py-1 rounded ${configTab === 'encounter' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setConfigTab('encounter')}>Encounter</button>
+              <button type="button" className={`text-sm px-2 py-1 rounded ${configTab === 'grid' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setConfigTab('grid')}>Grid</button>
             </div>
-            {mode === 'preset' ? (
-              <select className="input" value={preset} onChange={(e) => setPreset(e.target.value)}>
-                {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            ) : (
+            {configTab === 'encounter' && (
               <>
-                <select className="input" value={enemyId} onChange={(e) => setEnemyId(+e.target.value)}>
-                  {enemies.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'preset' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('preset')}>Preset</button>
+                  <button type="button" className={`text-sm px-2 py-1 rounded ${mode === 'custom' ? 'bg-dungeon-600' : 'bg-dungeon-800'}`} onClick={() => setMode('custom')}>Custom</button>
+                </div>
+                {mode === 'preset' ? (
+                  <select className="input" value={preset} onChange={(e) => setPreset(e.target.value)}>
+                    {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                ) : (
+                  <>
+                    <select className="input" value={enemyId} onChange={(e) => setEnemyId(+e.target.value)}>
+                      {enemies.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label">Count</label>
+                        <input className="input" type="number" min={1} max={10} value={count} onChange={(e) => setCount(+e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="label">Power scale</label>
+                        <input className="input" type="number" min={0.5} max={3} step={0.1} value={powerScale} onChange={(e) => setPowerScale(+e.target.value)} />
+                      </div>
+                    </div>
+                    <button type="button" className="btn-secondary text-sm" onClick={addCustomEntry}>Add to encounter</button>
+                    {customEntries.length > 0 && (
+                      <ul className="space-y-1 rounded border border-dungeon-700 p-2 text-sm">
+                        {customEntries.map((entry, i) => (
+                          <li key={i} className="flex items-center justify-between gap-2">
+                            <span>{entry.count}× {entry.name}{entry.power_scale !== 1 ? ` (scale ${entry.power_scale})` : ''}</span>
+                            <button type="button" className="text-xs text-red-400 hover:underline" onClick={() => removeCustomEntry(i)}>Remove</button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="label">Count</label>
-                    <input className="input" type="number" min={1} max={10} value={count} onChange={(e) => setCount(+e.target.value)} />
+                    <label className="label">Group init. bonus</label>
+                    <input className="input" type="number" step={0.1} value={groupBonus} onChange={(e) => setGroupBonus(+e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Power scale</label>
-                    <input className="input" type="number" min={0.5} max={3} step={0.1} value={powerScale} onChange={(e) => setPowerScale(+e.target.value)} />
+                    <label className="label">Enemy init. bonus</label>
+                    <input className="input" type="number" step={0.1} value={enemyBonus} onChange={(e) => setEnemyBonus(+e.target.value)} />
                   </div>
                 </div>
-                <button type="button" className="btn-secondary text-sm" onClick={addCustomEntry}>Add to encounter</button>
-                {customEntries.length > 0 && (
-                  <ul className="space-y-1 rounded border border-dungeon-700 p-2 text-sm">
-                    {customEntries.map((entry, i) => (
-                      <li key={i} className="flex items-center justify-between gap-2">
-                        <span>{entry.count}× {entry.name}{entry.power_scale !== 1 ? ` (scale ${entry.power_scale})` : ''}</span>
-                        <button type="button" className="text-xs text-red-400 hover:underline" onClick={() => removeCustomEntry(i)}>Remove</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </>
             )}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label">Group init. bonus</label>
-                <input className="input" type="number" step={0.1} value={groupBonus} onChange={(e) => setGroupBonus(+e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Enemy init. bonus</label>
-                <input className="input" type="number" step={0.1} value={enemyBonus} onChange={(e) => setEnemyBonus(+e.target.value)} />
-              </div>
-            </div>
+            {configTab === 'grid' && (
+              <>
+                <p className="text-sm text-stone-400">
+                  Suggested for {partySize} player{partySize === 1 ? '' : 's'}: {suggested}×{suggested}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label">Width</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={MIN_BATTLE_GRID}
+                      max={MAX_BATTLE_GRID}
+                      value={gridWidth}
+                      onChange={(e) => setGridWidth(+e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Height</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={MIN_BATTLE_GRID}
+                      max={MAX_BATTLE_GRID}
+                      value={gridHeight}
+                      onChange={(e) => setGridHeight(+e.target.value)}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={() => {
+                    setGridWidth(suggested);
+                    setGridHeight(suggested);
+                  }}
+                >
+                  Reset to suggested
+                </button>
+              </>
+            )}
             <div className="flex gap-2">
               <button type="button" className="btn-primary" onClick={create}>Next: Placement</button>
               <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
@@ -740,6 +804,7 @@ function BattleSetupModal({
             {encounterSummary && (
               <p className="text-sm text-dungeon-300">Encounter: {encounterSummary}</p>
             )}
+            <p className="text-sm text-stone-500">Grid: {battleState.grid.width}×{battleState.grid.height}</p>
             <p className="text-sm text-stone-400">
               Drag tokens to position the party and enemies. Toggle paint mode to place terrain, then continue.
             </p>
