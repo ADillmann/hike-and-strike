@@ -11,6 +11,7 @@ export function BattleGrid({
   width,
   height,
   actors,
+  blockedCells = [],
   highlightCells = [],
   rangeHighlightCells = [],
   targetHighlightCells = [],
@@ -23,6 +24,7 @@ export function BattleGrid({
   width: number;
   height: number;
   actors: GridActor[];
+  blockedCells?: { x: number; y: number }[];
   highlightCells?: { x: number; y: number }[];
   rangeHighlightCells?: { x: number; y: number }[];
   targetHighlightCells?: { x: number; y: number }[];
@@ -33,6 +35,7 @@ export function BattleGrid({
   onDragActor?: (actorId: string, x: number, y: number) => void;
 }) {
   const highlightSet = new Set(highlightCells.map((c) => `${c.x},${c.y}`));
+  const blockedSet = new Set(blockedCells.map((c) => `${c.x},${c.y}`));
   const rangeSet = new Set(rangeHighlightCells.map((c) => `${c.x},${c.y}`));
   const targetSet = new Set(targetHighlightCells.map((c) => `${c.x},${c.y}`));
   const byCell = new Map<string, GridActor>();
@@ -45,6 +48,7 @@ export function BattleGrid({
     for (let x = 0; x < width; x++) {
       const key = `${x},${y}`;
       const actor = byCell.get(key);
+      const blocked = blockedSet.has(key);
       const highlighted = highlightSet.has(key);
       const inRange = rangeSet.has(key);
       const isTarget = targetSet.has(key);
@@ -54,7 +58,9 @@ export function BattleGrid({
           key={key}
           type="button"
           className={`relative flex aspect-square items-center justify-center rounded border text-xs ${
-            isTarget
+            blocked
+              ? 'border-stone-700 bg-stone-950/90'
+              : isTarget
               ? 'border-green-500 bg-green-950/50 ring-2 ring-green-500/60'
               : highlighted
                 ? 'border-dungeon-400 bg-dungeon-700/80 ring-1 ring-dungeon-400'
@@ -63,14 +69,17 @@ export function BattleGrid({
                   : 'border-dungeon-800 bg-dungeon-900/60'
           } ${onCellClick ? 'cursor-pointer hover:border-dungeon-500' : ''}`}
           onClick={() => onCellClick?.(x, y)}
-          onDragOver={(e) => draggable && e.preventDefault()}
+          onDragOver={(e) => draggable && !blocked && e.preventDefault()}
           onDrop={(e) => {
-            if (!draggable || !onDragActor) return;
+            if (!draggable || !onDragActor || blocked) return;
             e.preventDefault();
             const aid = e.dataTransfer.getData('actorId');
             if (aid) onDragActor(aid, x, y);
           }}
         >
+          {blocked && !actor && (
+            <span className="text-stone-600 select-none" title="Obstacle">▪</span>
+          )}
           {actor && (
             <span
               draggable={draggable && !isDead}

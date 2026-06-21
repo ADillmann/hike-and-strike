@@ -75,7 +75,10 @@ const defaultPresetForm = (enemyNames: string[]): PresetForm => ({
 function enemyFormFromEnemy(enemy: Enemy): EnemyForm {
   const stats = defaultEnemyStats();
   for (const { key } of STAT_FIELDS) {
-    stats[key] = enemy.stats[key] ?? stats[key];
+    const val = enemy.stats[key];
+    if (typeof val === 'number') {
+      stats[key] = val;
+    }
   }
   const wc = enemy.stats.weapon_class === 'range' ? 'range' : 'melee';
   return {

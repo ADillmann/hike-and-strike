@@ -100,6 +100,24 @@ def test_update_battle_positions():
     assert new_state["actors"][0]["position"] == {"x": 1, "y": 2}
 
 
+def test_update_battle_positions_with_obstacles():
+    state = _minimal_state(phase="setup")
+    positions = {
+        "player_1_0": {"x": 0, "y": 0},
+        "enemy_1_0": {"x": 4, "y": 0},
+    }
+    blocked = [{"x": 2, "y": 0}, {"x": 2, "y": 1}]
+    new_state, msg = update_battle_positions(state, positions, blocked_cells=blocked)
+    assert msg == "ok"
+    assert new_state["grid"]["blocked_cells"] == blocked
+    bad_positions = {
+        "player_1_0": {"x": 2, "y": 0},
+        "enemy_1_0": {"x": 4, "y": 0},
+    }
+    _, err_msg = update_battle_positions(state, bad_positions, blocked_cells=blocked)
+    assert "blocked by terrain" in err_msg
+
+
 def test_prebattle_move_eligibility():
     actors = _minimal_state()["actors"]
     actors[0]["prebattle_eligible"] = True

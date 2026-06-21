@@ -16,6 +16,7 @@ from app.services.battle_geometry import (
     adjacent_empty_cells,
     apply_charge_penalty,
     apply_positions,
+    apply_blocked_cells,
     bfs_path_length,
     can_melee_attack,
     can_range_attack,
@@ -26,10 +27,12 @@ from app.services.battle_geometry import (
     is_adjacent,
     line_of_sight,
     pick_enemy_charge_cell,
+    reachable_charge_cells,
     reachable_cells,
     set_actor_pos,
     actor_pos,
     validate_positions,
+    validate_blocked_cells,
 )
 from app.services.character_stats import (
     aggregate_battle_modifiers,
@@ -218,7 +221,7 @@ def build_battle_state(
     return {
         "status": "pending",
         "phase": "setup" if not eligible_prebattle else "prebattle",
-        "grid": {"width": gs, "height": gs},
+        "grid": {"width": gs, "height": gs, "blocked_cells": list(cfg.get("blocked_cells") or [])},
         "group_initiative_bonus": gi_bonus,
         "enemy_initiative_bonus": en_bonus,
         "preset": preset,
@@ -261,11 +264,24 @@ def sync_weapon_profiles(db: Session, state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def update_battle_positions(state: dict[str, Any], positions: dict[str, dict[str, int]]) -> tuple[dict[str, Any], str]:
-    err = validate_positions(state, positions)
+def update_battle_positions(
+    state: dict[str, Any],
+    positions: dict[str, dict[str, int]],
+    blocked_cells: list[dict[str, int]] | None = None,
+) -> tuple[dict[str, Any], str]:
+    working = state
+    if blocked_cells is not None:
+        err = validate_blocked_cells(state, blocked_cells)
+        if err:
+            return state, err
+        working = apply_blocked_cells(state, blocked_cells)
+    err = validate_positions(working, positions)
     if err:
         return state, err
-    return apply_positions(state, positions), "ok"
+    new_state = apply_positions(working, positions)
+    if blocked_cells is not None:
+        new_state = apply_blocked_cells(new_state, blocked_cells)
+    return new_state, "ok"
 
 
 def apply_prebattle_move(
@@ -973,7 +989,7 @@ def battle_action_hints(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
             entry = {"id": other["id"], "charge_cells": []}
             if not is_adjacent(actor_pos(actor), actor_pos(other)):
                 entry["charge_cells"] = [
-                    {"x": x, "y": y} for x, y in adjacent_empty_cells(state, other, exclude_actor_id=actor_id)
+                    {"x": x, "y": y} for x, y in reachable_charge_cells(state, actor, other)
                 ]
             hints["melee_targets"].append(entry)
         if wp.get("can_ranged") and can_range_attack(state, actor, other, max_range):

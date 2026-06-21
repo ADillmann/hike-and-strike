@@ -248,7 +248,10 @@ async def update_positions(
         raise HTTPException(status_code=400, detail="Battle already started")
     state = battle.state_json or {}
     positions = {k: {"x": v.x, "y": v.y} for k, v in payload.positions.items()}
-    new_state, msg = update_battle_positions(state, positions)
+    blocked_cells = None
+    if payload.blocked_cells is not None:
+        blocked_cells = [{"x": c.x, "y": c.y} for c in payload.blocked_cells]
+    new_state, msg = update_battle_positions(state, positions, blocked_cells=blocked_cells)
     if msg != "ok":
         raise HTTPException(status_code=400, detail=msg)
     new_state["phase"] = "prebattle" if new_state.get("prebattle_pending") else "ready"

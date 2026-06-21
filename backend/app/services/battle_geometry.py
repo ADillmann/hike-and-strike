@@ -59,6 +59,22 @@ def _occupancy_map(state: dict, exclude_actor_id: str | None = None) -> set[Pos]
     return occupied
 
 
+def blocked_cells_set(state: dict) -> set[Pos]:
+    g = state.get("grid") or {}
+    cells = g.get("blocked_cells") or []
+    result: set[Pos] = set()
+    for cell in cells:
+        if isinstance(cell, dict):
+            result.add((int(cell["x"]), int(cell["y"])))
+        elif isinstance(cell, (list, tuple)) and len(cell) >= 2:
+            result.add((int(cell[0]), int(cell[1])))
+    return result
+
+
+def _movement_blockers(state: dict, exclude_actor_id: str | None = None) -> set[Pos]:
+    return _occupancy_map(state, exclude_actor_id=exclude_actor_id) | blocked_cells_set(state)
+
+
 def _ranged_los_blockers(state: dict, attacker: dict) -> set[Pos]:
     """Cells that block ranged line-of-sight for this attacker (allies do not block)."""
     attacker_type = attacker.get("type")
@@ -87,10 +103,10 @@ def adjacent_cells(x: int, y: int) -> list[Pos]:
 
 def adjacent_empty_cells(state: dict, target: dict, exclude_actor_id: str | None = None) -> list[Pos]:
     tx, ty = actor_pos(target)
-    occupied = _occupancy_map(state, exclude_actor_id=exclude_actor_id)
+    blockers = _movement_blockers(state, exclude_actor_id=exclude_actor_id)
     result: list[Pos] = []
     for cell in adjacent_cells(tx, ty):
-        if in_bounds(state, cell[0], cell[1]) and cell not in occupied:
+        if in_bounds(state, cell[0], cell[1]) and cell not in blockers:
             result.append(cell)
     return result
 
@@ -104,7 +120,7 @@ def bfs_path_length(
 ) -> int | None:
     if start == goal:
         return 0
-    occupied = _occupancy_map(state, exclude_actor_id=exclude_actor_id)
+    occupied = _movement_blockers(state, exclude_actor_id=exclude_actor_id)
     occupied.discard(start)
     if goal in occupied:
         return None
@@ -136,7 +152,7 @@ def reachable_cells(
     max_steps: int,
 ) -> list[Pos]:
     start = actor_pos(actor)
-    occupied = _occupancy_map(state, exclude_actor_id=actor["id"])
+    blockers = _movement_blockers(state, exclude_actor_id=actor["id"])
     queue: deque[tuple[Pos, int]] = deque([(start, 0)])
     seen = {start}
     reachable: list[Pos] = []
@@ -150,7 +166,7 @@ def reachable_cells(
             npos = (nx, ny)
             if not in_bounds(state, nx, ny) or npos in seen:
                 continue
-            if npos in occupied:
+            if npos in blockers:
                 continue
             seen.add(npos)
             queue.append((npos, dist + 1))
@@ -165,7 +181,7 @@ def apply_charge_penalty(base_damage: int, cells_moved: int) -> int:
 
 
 def pick_enemy_charge_cell(state: dict, enemy: dict, target: dict) -> Pos | None:
-    cells = adjacent_empty_cells(state, target, exclude_actor_id=enemy["id"])
+    cells = reachable_charge_cells(state, enemy, target)
     if not cells:
         return None
     ex, ey = actor_pos(enemy)
@@ -181,7 +197,7 @@ def pick_enemy_charge_cell(state: dict, enemy: dict, target: dict) -> Pos | None
         elif plen == best_dist:
             best.append(cell)
     if not best:
-        return random.choice(cells)
+        return None
     return random.choice(best)
 
 
@@ -217,8 +233,9 @@ def line_of_sight(state: dict, attacker: dict, target: dict, *, ignore_same_team
         occupied = _ranged_los_blockers(state, attacker)
     else:
         occupied = _occupancy_map(state)
+    terrain = blocked_cells_set(state)
     for cell in line[1:-1]:
-        if cell in occupied:
+        if cell in occupied or cell in terrain:
             return False
     return True
 
@@ -246,10 +263,23 @@ def actors_at_cells(state: dict, cells: list[Pos], actor_type: str | None = None
     return result
 
 
+def reachable_charge_cells(state: dict, attacker: dict, target: dict) -> list[Pos]:
+    """Empty cells adjacent to target that the attacker can path to."""
+    if is_adjacent(actor_pos(attacker), actor_pos(target)):
+        return []
+    start = actor_pos(attacker)
+    aid = attacker["id"]
+    result: list[Pos] = []
+    for cell in adjacent_empty_cells(state, target, exclude_actor_id=aid):
+        if bfs_path_length(state, start, cell, exclude_actor_id=aid) is not None:
+            result.append(cell)
+    return result
+
+
 def can_melee_attack(state: dict, attacker: dict, target: dict) -> bool:
     if is_adjacent(actor_pos(attacker), actor_pos(target)):
         return True
-    return bool(adjacent_empty_cells(state, target, exclude_actor_id=attacker["id"]))
+    return bool(reachable_charge_cells(state, attacker, target))
 
 
 def can_range_attack(state: dict, attacker: dict, target: dict, max_range: int = DEFAULT_RANGE_DISTANCE) -> bool:
@@ -272,6 +302,7 @@ def prebattle_reachable_cells(state: dict, actor: dict) -> list[Pos]:
 
 def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str | None:
     seen: set[Pos] = set()
+    blocked = blocked_cells_set(state)
     actor_ids = {a["id"] for a in state.get("actors", [])}
     for aid, pos in positions.items():
         if aid not in actor_ids:
@@ -279,6 +310,8 @@ def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str
         x, y = int(pos["x"]), int(pos["y"])
         if not in_bounds(state, x, y):
             return f"Position out of bounds for {aid}"
+        if (x, y) in blocked:
+            return f"Position blocked by terrain for {aid}"
         if (x, y) in seen:
             return "Two actors on same cell"
         seen.add((x, y))
@@ -286,6 +319,34 @@ def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str
         if actor["id"] not in positions:
             return f"Missing position for {actor['id']}"
     return None
+
+
+def validate_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> str | None:
+    seen: set[Pos] = set()
+    for cell in blocked_cells:
+        x, y = int(cell["x"]), int(cell["y"])
+        if not in_bounds(state, x, y):
+            return "Obstacle out of bounds"
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+    return None
+
+
+def apply_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> dict:
+    state = dict(state)
+    grid = dict(state.get("grid") or {})
+    normalized: list[dict[str, int]] = []
+    seen: set[Pos] = set()
+    for cell in blocked_cells:
+        x, y = int(cell["x"]), int(cell["y"])
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        normalized.append({"x": x, "y": y})
+    grid["blocked_cells"] = normalized
+    state["grid"] = grid
+    return state
 
 
 def apply_positions(state: dict, positions: dict[str, dict[str, int]]) -> dict:

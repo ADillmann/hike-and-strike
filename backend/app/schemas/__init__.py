@@ -484,6 +484,7 @@ class BattleActionRequest(BaseModel):
 
 class BattlePositionsUpdate(BaseModel):
     positions: dict[str, BattleCell]
+    blocked_cells: list[BattleCell] | None = None
 
 
 class PrebattleMoveRequest(BaseModel):

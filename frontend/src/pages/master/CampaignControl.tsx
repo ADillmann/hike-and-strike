@@ -520,7 +520,11 @@ function BattleSetupModal({
 }) {
   const [step, setStep] = useState<'config' | 'placement'>('config');
   const [battleId, setBattleId] = useState(0);
-  const [battleState, setBattleState] = useState<{ grid: { width: number; height: number }; actors: GridActor[] } | null>(null);
+  const [battleState, setBattleState] = useState<{
+    grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] };
+    actors: GridActor[];
+  } | null>(null);
+  const [paintObstacles, setPaintObstacles] = useState(false);
   const [encounterSummary, setEncounterSummary] = useState('');
   const [enemies, setEnemies] = useState<EnemyOption[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -573,12 +577,19 @@ function BattleSetupModal({
           enemy_initiative_bonus: enemyBonus,
         };
     try {
-      const res = await api.post<{ id: number; state: { grid: { width: number; height: number }; actors: GridActor[] } }>(
+      const res = await api.post<{ id: number; state: { grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] }; actors: GridActor[] } }>(
         `/battles/campaigns/${campaignId}`,
         payload,
       );
       setBattleId(res.id);
-      setBattleState({ grid: res.state.grid, actors: res.state.actors.map((a) => ({ ...a, position: a.position })) });
+      setBattleState({
+        grid: {
+          width: res.state.grid.width,
+          height: res.state.grid.height,
+          blocked_cells: res.state.grid.blocked_cells || [],
+        },
+        actors: res.state.actors.map((a) => ({ ...a, position: a.position })),
+      });
       setEncounterSummary(
         mode === 'preset'
           ? (presets.find((p) => p.id === preset)?.name || preset)
@@ -603,17 +614,38 @@ function BattleSetupModal({
     onClose();
   };
 
+  const blockedCells = battleState?.grid.blocked_cells || [];
+
+  const toggleObstacle = (x: number, y: number) => {
+    if (!battleState) return;
+    const occupied = battleState.actors.some((a) => a.position.x === x && a.position.y === y);
+    if (occupied) return;
+    const existing = blockedCells.some((c) => c.x === x && c.y === y);
+    const next = existing
+      ? blockedCells.filter((c) => !(c.x === x && c.y === y))
+      : [...blockedCells, { x, y }];
+    setBattleState({
+      ...battleState,
+      grid: { ...battleState.grid, blocked_cells: next },
+    });
+  };
+
   const savePositions = async () => {
     if (!battleState || !battleId) return;
     const positions: Record<string, { x: number; y: number }> = {};
     for (const a of battleState.actors) {
       positions[a.id] = { x: a.position.x, y: a.position.y };
     }
-    await api.patch(`/battles/${battleId}/positions`, { positions });
+    await api.patch(`/battles/${battleId}/positions`, {
+      positions,
+      blocked_cells: blockedCells,
+    });
   };
 
   const onDragActor = (actorId: string, x: number, y: number) => {
     if (!battleState) return;
+    const blocked = blockedCells.some((c) => c.x === x && c.y === y);
+    if (blocked) return;
     const occupied = battleState.actors.some((a) => a.id !== actorId && a.position.x === x && a.position.y === y);
     if (occupied) return;
     setBattleState({
@@ -697,13 +729,26 @@ function BattleSetupModal({
             {encounterSummary && (
               <p className="text-sm text-dungeon-300">Encounter: {encounterSummary}</p>
             )}
-            <p className="text-sm text-stone-400">Drag tokens to position the party and enemies, then continue.</p>
+            <p className="text-sm text-stone-400">
+              Drag tokens to position the party and enemies. Toggle obstacle painting to place terrain, then continue.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={`text-sm px-2 py-1 rounded ${paintObstacles ? 'bg-stone-600 ring-1 ring-stone-400' : 'bg-dungeon-800'}`}
+                onClick={() => setPaintObstacles((v) => !v)}
+              >
+                {paintObstacles ? 'Painting obstacles (click cells)' : 'Paint obstacles'}
+              </button>
+            </div>
             <BattleGrid
               width={battleState.grid.width}
               height={battleState.grid.height}
               actors={battleState.actors}
-              draggable
+              blockedCells={blockedCells}
+              draggable={!paintObstacles}
               onDragActor={onDragActor}
+              onCellClick={paintObstacles ? toggleObstacle : undefined}
             />
             <div className="flex gap-2">
               <button type="button" className="btn-primary" onClick={finish}>Continue to Battle</button>

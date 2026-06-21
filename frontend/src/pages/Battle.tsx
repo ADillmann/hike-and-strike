@@ -50,7 +50,7 @@ interface ActionHints {
 interface BattleState {
   status: string;
   phase?: string | null;
-  grid: { width: number; height: number };
+  grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] };
   actors: Actor[];
   active_actor_id: string | null;
   log: { message: string; timestamp: string }[];
@@ -140,19 +140,25 @@ export default function BattlePage() {
 
   const postAction = async (body: Record<string, unknown>) => {
     setError('');
+    const chargeMode = mode === 'attack_charge' || mode === 'skill_charge';
     try {
       await api.post(`/battles/${battleId}/action`, body);
       resetAction();
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed');
+      if (chargeMode) {
+        setMode(mode === 'attack_charge' ? 'attack' : 'skill');
+        setTargetId('');
+      }
     }
   };
 
   if (!battle) return <Layout title="Battle">{error || 'Loading...'}</Layout>;
 
   const state = battle.state;
-  const grid = state.grid || { width: 5, height: 5 };
+  const grid = state.grid || { width: 5, height: 5, blocked_cells: [] as { x: number; y: number }[] };
+  const blockedCells = (grid.blocked_cells || []) as { x: number; y: number }[];
   const active = state.actors.find((a) => a.id === state.active_actor_id);
   const myActor = state.actors.find((a) => a.character_id === battle.my_character_id);
   const isMyTurn = myActor && state.active_actor_id === myActor.id;
@@ -373,6 +379,7 @@ export default function BattlePage() {
             width={grid.width}
             height={grid.height}
             actors={gridActors}
+            blockedCells={blockedCells}
             highlightCells={highlightCells}
             rangeHighlightCells={rangeHighlightCells}
             targetHighlightCells={targetHighlightCells}
@@ -481,10 +488,22 @@ export default function BattlePage() {
                 </div>
               )}
               {mode === 'attack_charge' && (
-                <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge.</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge.</p>
+                  {highlightCells.length === 0 && (
+                    <p className="text-sm text-amber-400">No reachable charge path — cancel and try Move or another target.</p>
+                  )}
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                </div>
               )}
               {mode === 'skill_charge' && (
-                <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge with your skill.</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge with your skill.</p>
+                  {highlightCells.length === 0 && (
+                    <p className="text-sm text-amber-400">No reachable charge path — cancel and try Move or another target.</p>
+                  )}
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                </div>
               )}
               {(mode === 'move' || mode === 'guard') && (
                 <p className="text-sm text-stone-400">Click a highlighted cell to {mode === 'move' ? 'move' : 'guard'}.</p>

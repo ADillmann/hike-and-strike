@@ -1,15 +1,20 @@
 """Unit tests for battle grid geometry."""
 
 from app.services.battle_geometry import (
+    apply_blocked_cells,
     apply_charge_penalty,
     apply_positions,
+    adjacent_empty_cells,
     bfs_path_length,
+    blocked_cells_set,
     can_melee_attack,
     can_range_attack,
     default_placement,
     grid_size,
     line_of_sight,
     reachable_cells,
+    reachable_charge_cells,
+    validate_blocked_cells,
     validate_positions,
 )
 
@@ -124,3 +129,53 @@ def test_default_placement():
     assert actors[0]["position"]["x"] == 0
     assert actors[1]["position"]["x"] == 4
     assert actors[2]["position"]["x"] == 5
+
+
+def test_terrain_blocks_movement():
+    actor = {"id": "p", "alive": True, "position": {"x": 0, "y": 0}}
+    state = _state(actors=[actor])
+    state = apply_blocked_cells(state, [{"x": 1, "y": 0}, {"x": 0, "y": 1}])
+    cells = reachable_cells(state, actor, 2)
+    assert (1, 0) not in cells
+    assert (0, 1) not in cells
+    assert (1, 1) in cells
+
+
+def test_terrain_blocks_line_of_sight():
+    attacker = {"id": "a", "type": "player", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "t", "type": "enemy", "alive": True, "position": {"x": 4, "y": 0}}
+    state = _state(w=6, h=5, actors=[attacker, target])
+    state = apply_blocked_cells(state, [{"x": 2, "y": 0}])
+    assert line_of_sight(state, attacker, target, ignore_same_team=True) is False
+    assert can_range_attack(state, attacker, target, max_range=4) is False
+
+
+def test_validate_position_on_blocked_cell():
+    actors = [
+        {"id": "p1", "type": "player", "position": {"x": 0, "y": 0}},
+        {"id": "e1", "type": "enemy", "position": {"x": 4, "y": 0}},
+    ]
+    state = apply_blocked_cells(_state(actors=actors), [{"x": 2, "y": 2}])
+    positions = {"p1": {"x": 2, "y": 2}, "e1": {"x": 3, "y": 3}}
+    assert validate_positions(state, positions) == "Position blocked by terrain for p1"
+
+
+def test_validate_blocked_cells_bounds():
+    state = _state()
+    assert validate_blocked_cells(state, [{"x": 10, "y": 0}]) == "Obstacle out of bounds"
+    assert validate_blocked_cells(state, [{"x": 1, "y": 1}]) is None
+    assert blocked_cells_set(apply_blocked_cells(state, [{"x": 1, "y": 1}, {"x": 1, "y": 1}])) == {(1, 1)}
+
+
+def test_reachable_charge_cells_respect_terrain():
+    attacker = {"id": "p", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "e", "alive": True, "position": {"x": 4, "y": 4}}
+    state = _state(w=6, h=6, actors=[attacker, target])
+    state = apply_blocked_cells(state, [
+        {"x": 1, "y": 0}, {"x": 0, "y": 1},
+        {"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 2}, {"x": 2, "y": 3},
+        {"x": 3, "y": 3}, {"x": 3, "y": 4}, {"x": 4, "y": 3},
+    ])
+    assert adjacent_empty_cells(state, target, exclude_actor_id="p")
+    assert reachable_charge_cells(state, attacker, target) == []
+    assert can_melee_attack(state, attacker, target) is False
