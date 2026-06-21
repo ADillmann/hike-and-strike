@@ -17,6 +17,7 @@ from app.models import (
     Skill,
     SkillTemplate,
     StatChangeLog,
+    TemporaryEffect,
     User,
     UserRole,
 )
@@ -166,6 +167,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
                 "battle_modifiers": e.battle_modifiers or {},
                 "active_in_battle": e.active_in_battle,
                 "cleared_on_rest": e.cleared_on_rest,
+                "cleared_on_event": e.cleared_on_event,
             }
             for e in character.temporary_effects
         ],
@@ -341,6 +343,26 @@ async def edit_character_stats(
 
     db.commit()
     await broadcast_character_updated(db, character.id, payload.campaign_id)
+    return _serialize_character(db, character)
+
+
+@router.delete("/{character_id}/effects/{effect_id}", response_model=CharacterOut)
+async def remove_character_effect(
+    character_id: int,
+    effect_id: int,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+    campaign_id: int | None = None,
+) -> CharacterOut:
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    effect = db.get(TemporaryEffect, effect_id)
+    if not effect or effect.character_id != character_id:
+        raise HTTPException(status_code=404, detail="Effect not found")
+    db.delete(effect)
+    db.commit()
+    await broadcast_character_updated(db, character.id, campaign_id)
     return _serialize_character(db, character)
 
 

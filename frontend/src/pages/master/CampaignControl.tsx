@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character } from '../../api/client';
-import { Layout, StatEditor } from '../../components/Layout';
+import { Layout } from '../../components/Layout';
+import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
@@ -78,7 +79,6 @@ export default function CampaignControlPage() {
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   const [activeBattleId, setActiveBattleId] = useState<number | null>(null);
   const [editChar, setEditChar] = useState<Character | null>(null);
-  const [editStats, setEditStats] = useState<Record<string, number>>({});
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
   const [addEventTemplateId, setAddEventTemplateId] = useState(0);
   const [addEventLabel, setAddEventLabel] = useState('');
@@ -184,22 +184,9 @@ export default function CampaignControlPage() {
     }
   };
 
-  const openStatEdit = async (charId: number) => {
+  const openCharacterEdit = async (charId: number) => {
     const c = await api.get<Character>(`/characters/${charId}`);
     setEditChar(c);
-    setEditStats({ ...c.stats, current_hp: c.current_hp, max_hp: c.max_hp });
-  };
-
-  const saveStatEdit = async () => {
-    if (!editChar) return;
-    const changes: Record<string, number> = {};
-    for (const [k, v] of Object.entries(editStats)) {
-      const old = k === 'current_hp' || k === 'max_hp' ? (editChar as unknown as Record<string, number>)[k] : editChar.stats[k];
-      if (v !== old) changes[k] = v;
-    }
-    await api.patch(`/characters/${editChar.id}/stats`, { changes, campaign_id: campaignId });
-    setEditChar(null);
-    load();
   };
 
   if (!state) return <Layout title="Campaign Control">Loading...</Layout>;
@@ -267,7 +254,7 @@ export default function CampaignControlPage() {
                 <span>HP {p.current_hp}/{p.max_hp}</span>
               </div>
               <div className="mt-1">
-                <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => openStatEdit(p.id)}>Edit Stats</button>
+                <button className="btn-secondary px-2 py-0.5 text-xs" onClick={() => openCharacterEdit(p.id)}>Edit</button>
               </div>
             </div>
           ))}
@@ -446,16 +433,13 @@ export default function CampaignControlPage() {
       )}
 
       {editChar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="card max-w-md w-full">
-            <h3 className="mb-3 font-semibold">Edit {editChar.name}</h3>
-            <StatEditor stats={editStats} onChange={(s, v) => setEditStats({ ...editStats, [s]: Math.max(1, v) })} />
-            <div className="mt-3 flex gap-2">
-              <button className="btn-primary" onClick={saveStatEdit}>Save</button>
-              <button className="btn-secondary" onClick={() => setEditChar(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <PartyCharacterEditModal
+          character={editChar}
+          campaignId={campaignId}
+          onClose={() => setEditChar(null)}
+          onSaved={load}
+          onCharacterUpdated={setEditChar}
+        />
       )}
 
       {showBattleSetup && (

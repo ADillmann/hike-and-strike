@@ -106,5 +106,6 @@ export interface Character {
     battle_modifiers?: Record<string, number>;
     active_in_battle?: boolean;
     cleared_on_rest?: boolean;
+    cleared_on_event?: boolean;
   }[];
 }
