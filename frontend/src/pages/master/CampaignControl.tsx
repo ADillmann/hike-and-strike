@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character, REWARDS_BLOCKED_DURING_BATTLE } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
-import { BattleGrid, GridActor } from '../../components/BattleGrid';
+import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, normalizeTerrainCells, TerrainCell } from '../../components/BattleGrid';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
@@ -528,7 +528,7 @@ function BattleSetupModal({
   const [step, setStep] = useState<'config' | 'placement'>('config');
   const [battleId, setBattleId] = useState(0);
   const [battleState, setBattleState] = useState<{
-    grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] };
+    grid: { width: number; height: number; terrain_cells?: TerrainCell[]; blocked_cells?: { x: number; y: number }[] };
     actors: GridActor[];
   } | null>(null);
   const [paintObstacles, setPaintObstacles] = useState(false);
@@ -584,7 +584,7 @@ function BattleSetupModal({
           enemy_initiative_bonus: enemyBonus,
         };
     try {
-      const res = await api.post<{ id: number; state: { grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] }; actors: GridActor[] } }>(
+      const res = await api.post<{ id: number; state: { grid: { width: number; height: number; terrain_cells?: TerrainCell[]; blocked_cells?: { x: number; y: number }[] }; actors: GridActor[] } }>(
         `/battles/campaigns/${campaignId}`,
         payload,
       );
@@ -593,7 +593,7 @@ function BattleSetupModal({
         grid: {
           width: res.state.grid.width,
           height: res.state.grid.height,
-          blocked_cells: res.state.grid.blocked_cells || [],
+          terrain_cells: normalizeTerrainCells(res.state.grid),
         },
         actors: res.state.actors.map((a) => ({ ...a, position: a.position })),
       });
@@ -621,19 +621,23 @@ function BattleSetupModal({
     onClose();
   };
 
-  const blockedCells = battleState?.grid.blocked_cells || [];
+  const terrainCells = battleState?.grid.terrain_cells || [];
 
-  const toggleObstacle = (x: number, y: number) => {
+  const cycleTerrain = (x: number, y: number) => {
     if (!battleState) return;
     const occupied = battleState.actors.some((a) => a.position.x === x && a.position.y === y);
     if (occupied) return;
-    const existing = blockedCells.some((c) => c.x === x && c.y === y);
-    const next = existing
-      ? blockedCells.filter((c) => !(c.x === x && c.y === y))
-      : [...blockedCells, { x, y }];
+    const existing = terrainCells.find((c) => c.x === x && c.y === y);
+    const nextType = cycleTerrainType(existing?.type);
+    const next =
+      nextType === 'empty'
+        ? terrainCells.filter((c) => !(c.x === x && c.y === y))
+        : existing
+          ? terrainCells.map((c) => (c.x === x && c.y === y ? { x, y, type: nextType } : c))
+          : [...terrainCells, { x, y, type: nextType }];
     setBattleState({
       ...battleState,
-      grid: { ...battleState.grid, blocked_cells: next },
+      grid: { ...battleState.grid, terrain_cells: next },
     });
   };
 
@@ -645,14 +649,14 @@ function BattleSetupModal({
     }
     await api.patch(`/battles/${battleId}/positions`, {
       positions,
-      blocked_cells: blockedCells,
+      terrain_cells: terrainCells,
     });
   };
 
   const onDragActor = (actorId: string, x: number, y: number) => {
     if (!battleState) return;
-    const blocked = blockedCells.some((c) => c.x === x && c.y === y);
-    if (blocked) return;
+    const cell = terrainCells.find((c) => c.x === x && c.y === y);
+    if (cell && isImpassableTerrain(cell.type)) return;
     const occupied = battleState.actors.some((a) => a.id !== actorId && a.position.x === x && a.position.y === y);
     if (occupied) return;
     setBattleState({
@@ -737,25 +741,28 @@ function BattleSetupModal({
               <p className="text-sm text-dungeon-300">Encounter: {encounterSummary}</p>
             )}
             <p className="text-sm text-stone-400">
-              Drag tokens to position the party and enemies. Toggle obstacle painting to place terrain, then continue.
+              Drag tokens to position the party and enemies. Toggle paint mode to place terrain, then continue.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className={`text-sm px-2 py-1 rounded ${paintObstacles ? 'bg-stone-600 ring-1 ring-stone-400' : 'bg-dungeon-800'}`}
                 onClick={() => setPaintObstacles((v) => !v)}
               >
-                {paintObstacles ? 'Painting obstacles (click cells)' : 'Paint obstacles'}
+                {paintObstacles ? 'Painting terrain (click cells)' : 'Paint terrain'}
               </button>
+              {paintObstacles && (
+                <span className="text-xs text-stone-500">Click cycles: Wall → Water → Forest → clear</span>
+              )}
             </div>
             <BattleGrid
               width={battleState.grid.width}
               height={battleState.grid.height}
               actors={battleState.actors}
-              blockedCells={blockedCells}
+              terrainCells={terrainCells}
               draggable={!paintObstacles}
               onDragActor={onDragActor}
-              onCellClick={paintObstacles ? toggleObstacle : undefined}
+              onCellClick={paintObstacles ? cycleTerrain : undefined}
             />
             <div className="flex gap-2">
               <button type="button" className="btn-primary" onClick={finish}>Continue to Battle</button>

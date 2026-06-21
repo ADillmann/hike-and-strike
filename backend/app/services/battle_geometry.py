@@ -8,6 +8,11 @@ from typing import Any
 
 Pos = tuple[int, int]
 
+TERRAIN_WALL = "wall"
+TERRAIN_WATER = "water"
+TERRAIN_FOREST = "forest"
+VALID_TERRAIN = frozenset({TERRAIN_WALL, TERRAIN_WATER, TERRAIN_FOREST})
+
 GUARD_BASE_REDUCTION = 0.3
 SHIELD_GUARD_BONUS = 0.15
 CHARGE_PENALTY_PER_CELL = 0.2
@@ -59,20 +64,52 @@ def _occupancy_map(state: dict, exclude_actor_id: str | None = None) -> set[Pos]
     return occupied
 
 
-def blocked_cells_set(state: dict) -> set[Pos]:
+def terrain_map(state: dict) -> dict[Pos, str]:
     g = state.get("grid") or {}
-    cells = g.get("blocked_cells") or []
-    result: set[Pos] = set()
-    for cell in cells:
-        if isinstance(cell, dict):
-            result.add((int(cell["x"]), int(cell["y"])))
-        elif isinstance(cell, (list, tuple)) and len(cell) >= 2:
-            result.add((int(cell[0]), int(cell[1])))
+    result: dict[Pos, str] = {}
+    for cell in g.get("terrain_cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        x, y = int(cell["x"]), int(cell["y"])
+        t = str(cell.get("type", TERRAIN_WALL))
+        if t not in VALID_TERRAIN:
+            t = TERRAIN_WALL
+        result[(x, y)] = t
+    if not result:
+        for cell in g.get("blocked_cells") or []:
+            if isinstance(cell, dict):
+                x, y = int(cell["x"]), int(cell["y"])
+            elif isinstance(cell, (list, tuple)) and len(cell) >= 2:
+                x, y = int(cell[0]), int(cell[1])
+            else:
+                continue
+            result[(x, y)] = TERRAIN_WALL
     return result
 
 
+def terrain_type_at(state: dict, pos: Pos) -> str | None:
+    return terrain_map(state).get(pos)
+
+
+def movement_blockers_set(state: dict) -> set[Pos]:
+    return {p for p, t in terrain_map(state).items() if t in (TERRAIN_WALL, TERRAIN_WATER)}
+
+
+def los_blockers_set(state: dict) -> set[Pos]:
+    return {p for p, t in terrain_map(state).items() if t in (TERRAIN_WALL, TERRAIN_FOREST)}
+
+
+def target_blocks_ranged(state: dict, target: dict) -> bool:
+    return terrain_type_at(state, actor_pos(target)) == TERRAIN_FOREST
+
+
+def blocked_cells_set(state: dict) -> set[Pos]:
+    """Legacy helper: all impassable/wall terrain positions (walls only for compat tests)."""
+    return movement_blockers_set(state)
+
+
 def _movement_blockers(state: dict, exclude_actor_id: str | None = None) -> set[Pos]:
-    return _occupancy_map(state, exclude_actor_id=exclude_actor_id) | blocked_cells_set(state)
+    return _occupancy_map(state, exclude_actor_id=exclude_actor_id) | movement_blockers_set(state)
 
 
 def _ranged_los_blockers(state: dict, attacker: dict) -> set[Pos]:
@@ -233,9 +270,9 @@ def line_of_sight(state: dict, attacker: dict, target: dict, *, ignore_same_team
         occupied = _ranged_los_blockers(state, attacker)
     else:
         occupied = _occupancy_map(state)
-    terrain = blocked_cells_set(state)
+    los_terrain = los_blockers_set(state)
     for cell in line[1:-1]:
-        if cell in occupied or cell in terrain:
+        if cell in occupied or cell in los_terrain:
             return False
     return True
 
@@ -285,6 +322,8 @@ def can_melee_attack(state: dict, attacker: dict, target: dict) -> bool:
 def can_range_attack(state: dict, attacker: dict, target: dict, max_range: int = DEFAULT_RANGE_DISTANCE) -> bool:
     if chebyshev_distance(actor_pos(attacker), actor_pos(target)) > max_range:
         return False
+    if target_blocks_ranged(state, target):
+        return False
     return line_of_sight(state, attacker, target, ignore_same_team=True)
 
 
@@ -302,7 +341,7 @@ def prebattle_reachable_cells(state: dict, actor: dict) -> list[Pos]:
 
 def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str | None:
     seen: set[Pos] = set()
-    blocked = blocked_cells_set(state)
+    impassable = movement_blockers_set(state)
     actor_ids = {a["id"] for a in state.get("actors", [])}
     for aid, pos in positions.items():
         if aid not in actor_ids:
@@ -310,7 +349,7 @@ def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str
         x, y = int(pos["x"]), int(pos["y"])
         if not in_bounds(state, x, y):
             return f"Position out of bounds for {aid}"
-        if (x, y) in blocked:
+        if (x, y) in impassable:
             return f"Position blocked by terrain for {aid}"
         if (x, y) in seen:
             return "Two actors on same cell"
@@ -321,32 +360,57 @@ def validate_positions(state: dict, positions: dict[str, dict[str, int]]) -> str
     return None
 
 
-def validate_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> str | None:
+def _normalize_terrain_cell(cell: dict[str, Any]) -> dict[str, int | str]:
+    x, y = int(cell["x"]), int(cell["y"])
+    t = str(cell.get("type", TERRAIN_WALL))
+    if t not in VALID_TERRAIN:
+        t = TERRAIN_WALL
+    return {"x": x, "y": y, "type": t}
+
+
+def validate_terrain_cells(state: dict, terrain_cells: list[dict[str, Any]]) -> str | None:
     seen: set[Pos] = set()
-    for cell in blocked_cells:
+    for cell in terrain_cells:
         x, y = int(cell["x"]), int(cell["y"])
         if not in_bounds(state, x, y):
-            return "Obstacle out of bounds"
+            return "Terrain out of bounds"
+        t = str(cell.get("type", TERRAIN_WALL))
+        if t not in VALID_TERRAIN:
+            return f"Invalid terrain type: {t}"
         if (x, y) in seen:
             continue
         seen.add((x, y))
     return None
 
 
-def apply_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> dict:
+def apply_terrain_cells(state: dict, terrain_cells: list[dict[str, Any]]) -> dict:
     state = dict(state)
     grid = dict(state.get("grid") or {})
-    normalized: list[dict[str, int]] = []
+    normalized: list[dict[str, int | str]] = []
     seen: set[Pos] = set()
-    for cell in blocked_cells:
-        x, y = int(cell["x"]), int(cell["y"])
+    for cell in terrain_cells:
+        entry = _normalize_terrain_cell(cell)
+        x, y = int(entry["x"]), int(entry["y"])
         if (x, y) in seen:
             continue
         seen.add((x, y))
-        normalized.append({"x": x, "y": y})
-    grid["blocked_cells"] = normalized
+        normalized.append(entry)
+    grid["terrain_cells"] = normalized
     state["grid"] = grid
     return state
+
+
+def validate_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> str | None:
+    terrain = [{"x": c["x"], "y": c["y"], "type": TERRAIN_WALL} for c in blocked_cells]
+    err = validate_terrain_cells(state, terrain)
+    if err == "Terrain out of bounds":
+        return "Obstacle out of bounds"
+    return err
+
+
+def apply_blocked_cells(state: dict, blocked_cells: list[dict[str, int]]) -> dict:
+    terrain = [{"x": int(c["x"]), "y": int(c["y"]), "type": TERRAIN_WALL} for c in blocked_cells]
+    return apply_terrain_cells(state, terrain)
 
 
 def apply_positions(state: dict, positions: dict[str, dict[str, int]]) -> dict:

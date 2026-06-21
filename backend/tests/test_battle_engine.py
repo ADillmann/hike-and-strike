@@ -109,15 +109,15 @@ def test_update_battle_positions_with_obstacles():
         "player_1_0": {"x": 0, "y": 0},
         "enemy_1_0": {"x": 4, "y": 0},
     }
-    blocked = [{"x": 2, "y": 0}, {"x": 2, "y": 1}]
-    new_state, msg = update_battle_positions(state, positions, blocked_cells=blocked)
+    terrain = [{"x": 2, "y": 0, "type": "wall"}, {"x": 2, "y": 1, "type": "wall"}]
+    new_state, msg = update_battle_positions(state, positions, terrain_cells=terrain)
     assert msg == "ok"
-    assert new_state["grid"]["blocked_cells"] == blocked
+    assert new_state["grid"]["terrain_cells"] == terrain
     bad_positions = {
         "player_1_0": {"x": 2, "y": 0},
         "enemy_1_0": {"x": 4, "y": 0},
     }
-    _, err_msg = update_battle_positions(state, bad_positions, blocked_cells=blocked)
+    _, err_msg = update_battle_positions(state, bad_positions, terrain_cells=terrain)
     assert "blocked by terrain" in err_msg
 
 

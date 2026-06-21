@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { BattleGrid, GridActor } from '../components/BattleGrid';
+import { BattleGrid, GridActor, normalizeTerrainCells } from '../components/BattleGrid';
 import { Layout } from '../components/Layout';
 import { formatOutcomeSummary } from '../components/RewardsPanel';
 import { useCampaignSocket } from '../hooks/useCampaignSocket';
@@ -50,7 +50,7 @@ interface ActionHints {
 interface BattleState {
   status: string;
   phase?: string | null;
-  grid: { width: number; height: number; blocked_cells?: { x: number; y: number }[] };
+  grid: { width: number; height: number; terrain_cells?: { x: number; y: number; type: 'wall' | 'water' | 'forest' }[]; blocked_cells?: { x: number; y: number }[] };
   actors: Actor[];
   active_actor_id: string | null;
   log: { message: string; timestamp: string }[];
@@ -157,8 +157,8 @@ export default function BattlePage() {
   if (!battle) return <Layout title="Battle">{error || 'Loading...'}</Layout>;
 
   const state = battle.state;
-  const grid = state.grid || { width: 5, height: 5, blocked_cells: [] as { x: number; y: number }[] };
-  const blockedCells = (grid.blocked_cells || []) as { x: number; y: number }[];
+  const grid = state.grid || { width: 5, height: 5, terrain_cells: [] };
+  const terrainCells = normalizeTerrainCells(grid);
   const active = state.actors.find((a) => a.id === state.active_actor_id);
   const myActor = state.actors.find((a) => a.character_id === battle.my_character_id);
   const isMyTurn = myActor && state.active_actor_id === myActor.id;
@@ -379,7 +379,7 @@ export default function BattlePage() {
             width={grid.width}
             height={grid.height}
             actors={gridActors}
-            blockedCells={blockedCells}
+            terrainCells={terrainCells}
             highlightCells={highlightCells}
             rangeHighlightCells={rangeHighlightCells}
             targetHighlightCells={targetHighlightCells}

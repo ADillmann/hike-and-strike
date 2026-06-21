@@ -7,6 +7,37 @@ export interface GridActor {
   character_id?: number;
 }
 
+export type TerrainType = 'wall' | 'water' | 'forest';
+
+export interface TerrainCell {
+  x: number;
+  y: number;
+  type: TerrainType;
+}
+
+export function normalizeTerrainCells(grid: {
+  terrain_cells?: TerrainCell[];
+  blocked_cells?: { x: number; y: number }[];
+}): TerrainCell[] {
+  if (grid.terrain_cells?.length) return grid.terrain_cells;
+  return (grid.blocked_cells || []).map((c) => ({ x: c.x, y: c.y, type: 'wall' as const }));
+}
+
+export function isImpassableTerrain(type: TerrainType): boolean {
+  return type === 'wall' || type === 'water';
+}
+
+const TERRAIN_CYCLE: Record<TerrainType | 'empty', TerrainType | 'empty'> = {
+  empty: 'wall',
+  wall: 'water',
+  water: 'forest',
+  forest: 'empty',
+};
+
+export function cycleTerrainType(current: TerrainType | undefined): TerrainType | 'empty' {
+  return TERRAIN_CYCLE[current ?? 'empty'];
+}
+
 /** Short label for grid cells (e.g. "Bandit A" → "Ban·A", "Goblin B" → "Gob·B"). */
 export function gridTokenLabel(name: string): string {
   const letterMatch = name.match(/^(.+?)\s+([A-Z])$/);
@@ -29,11 +60,33 @@ function _abbrevTokenBase(baseName: string): string {
   return first.slice(0, 3);
 }
 
+function terrainCellClass(type: TerrainType): string {
+  switch (type) {
+    case 'wall':
+      return 'border-stone-700 bg-stone-950/90';
+    case 'water':
+      return 'border-blue-800 bg-blue-950/70';
+    case 'forest':
+      return 'border-green-900 bg-green-950/50';
+  }
+}
+
+function terrainGlyph(type: TerrainType): string {
+  switch (type) {
+    case 'wall':
+      return '▪';
+    case 'water':
+      return '~';
+    case 'forest':
+      return '*';
+  }
+}
+
 export function BattleGrid({
   width,
   height,
   actors,
-  blockedCells = [],
+  terrainCells = [],
   highlightCells = [],
   rangeHighlightCells = [],
   targetHighlightCells = [],
@@ -46,7 +99,7 @@ export function BattleGrid({
   width: number;
   height: number;
   actors: GridActor[];
-  blockedCells?: { x: number; y: number }[];
+  terrainCells?: TerrainCell[];
   highlightCells?: { x: number; y: number }[];
   rangeHighlightCells?: { x: number; y: number }[];
   targetHighlightCells?: { x: number; y: number }[];
@@ -57,7 +110,10 @@ export function BattleGrid({
   onDragActor?: (actorId: string, x: number, y: number) => void;
 }) {
   const highlightSet = new Set(highlightCells.map((c) => `${c.x},${c.y}`));
-  const blockedSet = new Set(blockedCells.map((c) => `${c.x},${c.y}`));
+  const terrainByCell = new Map<string, TerrainType>();
+  for (const c of terrainCells) {
+    terrainByCell.set(`${c.x},${c.y}`, c.type);
+  }
   const rangeSet = new Set(rangeHighlightCells.map((c) => `${c.x},${c.y}`));
   const targetSet = new Set(targetHighlightCells.map((c) => `${c.x},${c.y}`));
   const byCell = new Map<string, GridActor>();
@@ -70,7 +126,8 @@ export function BattleGrid({
     for (let x = 0; x < width; x++) {
       const key = `${x},${y}`;
       const actor = byCell.get(key);
-      const blocked = blockedSet.has(key);
+      const terrainType = terrainByCell.get(key);
+      const impassable = terrainType !== undefined && isImpassableTerrain(terrainType);
       const highlighted = highlightSet.has(key);
       const inRange = rangeSet.has(key);
       const isTarget = targetSet.has(key);
@@ -80,8 +137,8 @@ export function BattleGrid({
           key={key}
           type="button"
           className={`relative flex aspect-square items-center justify-center rounded border text-xs ${
-            blocked
-              ? 'border-stone-700 bg-stone-950/90'
+            terrainType
+              ? terrainCellClass(terrainType)
               : isTarget
               ? 'border-green-500 bg-green-950/50 ring-2 ring-green-500/60'
               : highlighted
@@ -91,16 +148,27 @@ export function BattleGrid({
                   : 'border-dungeon-800 bg-dungeon-900/60'
           } ${onCellClick ? 'cursor-pointer hover:border-dungeon-500' : ''}`}
           onClick={() => onCellClick?.(x, y)}
-          onDragOver={(e) => draggable && !blocked && e.preventDefault()}
+          onDragOver={(e) => draggable && !impassable && e.preventDefault()}
           onDrop={(e) => {
-            if (!draggable || !onDragActor || blocked) return;
+            if (!draggable || !onDragActor || impassable) return;
             e.preventDefault();
             const aid = e.dataTransfer.getData('actorId');
             if (aid) onDragActor(aid, x, y);
           }}
         >
-          {blocked && !actor && (
-            <span className="text-stone-600 select-none" title="Obstacle">▪</span>
+          {terrainType && !actor && (
+            <span
+              className={`select-none ${
+                terrainType === 'wall'
+                  ? 'text-stone-600'
+                  : terrainType === 'water'
+                    ? 'text-blue-400/80'
+                    : 'text-green-600/80'
+              }`}
+              title={terrainType}
+            >
+              {terrainGlyph(terrainType)}
+            </span>
           )}
           {actor && (
             <span

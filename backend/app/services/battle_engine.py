@@ -17,6 +17,7 @@ from app.services.battle_geometry import (
     apply_charge_penalty,
     apply_positions,
     apply_blocked_cells,
+    apply_terrain_cells,
     bfs_path_length,
     can_melee_attack,
     can_range_attack,
@@ -33,6 +34,7 @@ from app.services.battle_geometry import (
     actor_pos,
     validate_positions,
     validate_blocked_cells,
+    validate_terrain_cells,
 )
 from app.services.character_stats import (
     aggregate_battle_modifiers,
@@ -257,7 +259,11 @@ def build_battle_state(
     return {
         "status": "pending",
         "phase": "setup" if not eligible_prebattle else "prebattle",
-        "grid": {"width": gs, "height": gs, "blocked_cells": list(cfg.get("blocked_cells") or [])},
+        "grid": {
+            "width": gs,
+            "height": gs,
+            "terrain_cells": _initial_terrain_cells(cfg),
+        },
         "group_initiative_bonus": gi_bonus,
         "enemy_initiative_bonus": en_bonus,
         "preset": preset,
@@ -300,23 +306,39 @@ def sync_weapon_profiles(db: Session, state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def _initial_terrain_cells(cfg: dict[str, Any]) -> list[dict[str, int | str]]:
+    if cfg.get("terrain_cells"):
+        return [
+            {"x": int(c["x"]), "y": int(c["y"]), "type": str(c.get("type", "wall"))}
+            for c in cfg["terrain_cells"]
+        ]
+    return [
+        {"x": int(c["x"]), "y": int(c["y"]), "type": "wall"}
+        for c in (cfg.get("blocked_cells") or [])
+    ]
+
+
 def update_battle_positions(
     state: dict[str, Any],
     positions: dict[str, dict[str, int]],
+    terrain_cells: list[dict[str, Any]] | None = None,
     blocked_cells: list[dict[str, int]] | None = None,
 ) -> tuple[dict[str, Any], str]:
+    cells_to_apply = terrain_cells
+    if cells_to_apply is None and blocked_cells is not None:
+        cells_to_apply = [{"x": c["x"], "y": c["y"], "type": "wall"} for c in blocked_cells]
     working = state
-    if blocked_cells is not None:
-        err = validate_blocked_cells(state, blocked_cells)
+    if cells_to_apply is not None:
+        err = validate_terrain_cells(state, cells_to_apply)
         if err:
             return state, err
-        working = apply_blocked_cells(state, blocked_cells)
+        working = apply_terrain_cells(state, cells_to_apply)
     err = validate_positions(working, positions)
     if err:
         return state, err
     new_state = apply_positions(working, positions)
-    if blocked_cells is not None:
-        new_state = apply_blocked_cells(new_state, blocked_cells)
+    if cells_to_apply is not None:
+        new_state = apply_terrain_cells(new_state, cells_to_apply)
     return new_state, "ok"
 
 

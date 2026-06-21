@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -483,8 +483,15 @@ class BattleActionRequest(BaseModel):
     inventory_item_id: int | None = None
 
 
+class BattleTerrainCell(BaseModel):
+    x: int
+    y: int
+    type: Literal["wall", "water", "forest"] = "wall"
+
+
 class BattlePositionsUpdate(BaseModel):
     positions: dict[str, BattleCell]
+    terrain_cells: list[BattleTerrainCell] | None = None
     blocked_cells: list[BattleCell] | None = None
 
 

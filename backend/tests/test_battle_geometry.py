@@ -1,9 +1,13 @@
 """Unit tests for battle grid geometry."""
 
 from app.services.battle_geometry import (
+    TERRAIN_FOREST,
+    TERRAIN_WALL,
+    TERRAIN_WATER,
     apply_blocked_cells,
     apply_charge_penalty,
     apply_positions,
+    apply_terrain_cells,
     adjacent_empty_cells,
     bfs_path_length,
     blocked_cells_set,
@@ -16,6 +20,7 @@ from app.services.battle_geometry import (
     reachable_charge_cells,
     validate_blocked_cells,
     validate_positions,
+    validate_terrain_cells,
 )
 
 
@@ -179,3 +184,77 @@ def test_reachable_charge_cells_respect_terrain():
     assert adjacent_empty_cells(state, target, exclude_actor_id="p")
     assert reachable_charge_cells(state, attacker, target) == []
     assert can_melee_attack(state, attacker, target) is False
+
+
+def _terrain_cell(x: int, y: int, t: str) -> dict:
+    return {"x": x, "y": y, "type": t}
+
+
+def test_water_blocks_movement_but_not_ranged_los():
+    actor = {"id": "p", "alive": True, "position": {"x": 0, "y": 0}}
+    attacker = {"id": "a", "type": "player", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "t", "type": "enemy", "alive": True, "position": {"x": 4, "y": 0}}
+    state = _state(w=6, h=5, actors=[actor, attacker, target])
+    state = apply_terrain_cells(state, [_terrain_cell(1, 0, TERRAIN_WATER), _terrain_cell(2, 0, TERRAIN_WATER)])
+    cells = reachable_cells(state, actor, 3)
+    assert (1, 0) not in cells
+    assert (2, 0) not in cells
+    assert line_of_sight(state, attacker, target, ignore_same_team=True) is True
+    assert can_range_attack(state, attacker, target, max_range=4) is True
+
+
+def test_forest_on_path_blocks_ranged():
+    attacker = {"id": "a", "type": "player", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "t", "type": "enemy", "alive": True, "position": {"x": 4, "y": 0}}
+    state = _state(w=6, h=5, actors=[attacker, target])
+    state = apply_terrain_cells(state, [_terrain_cell(2, 0, TERRAIN_FOREST)])
+    assert line_of_sight(state, attacker, target, ignore_same_team=True) is False
+    assert can_range_attack(state, attacker, target, max_range=4) is False
+
+
+def test_forest_target_blocks_ranged():
+    attacker = {"id": "a", "type": "player", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "t", "type": "enemy", "alive": True, "position": {"x": 4, "y": 0}}
+    state = _state(w=6, h=5, actors=[attacker, target])
+    state = apply_terrain_cells(state, [_terrain_cell(4, 0, TERRAIN_FOREST)])
+    assert line_of_sight(state, attacker, target, ignore_same_team=True) is True
+    assert can_range_attack(state, attacker, target, max_range=4) is False
+
+
+def test_forest_attacker_can_ranged_attack():
+    attacker = {"id": "a", "type": "player", "alive": True, "position": {"x": 0, "y": 0}}
+    target = {"id": "t", "type": "enemy", "alive": True, "position": {"x": 4, "y": 0}}
+    state = _state(w=6, h=5, actors=[attacker, target])
+    state = apply_terrain_cells(state, [_terrain_cell(0, 0, TERRAIN_FOREST)])
+    attacker["position"] = {"x": 0, "y": 0}
+    assert can_range_attack(state, attacker, target, max_range=4) is True
+
+
+def test_forest_allows_movement_and_placement():
+    actors = [
+        {"id": "p1", "type": "player", "position": {"x": 0, "y": 0}},
+        {"id": "e1", "type": "enemy", "position": {"x": 4, "y": 0}},
+    ]
+    actor = {"id": "p", "alive": True, "position": {"x": 0, "y": 0}}
+    state = apply_terrain_cells(_state(actors=actors), [_terrain_cell(2, 2, TERRAIN_FOREST)])
+    cells = reachable_cells(state, actor, 4)
+    assert (2, 2) in cells
+    positions = {"p1": {"x": 2, "y": 2}, "e1": {"x": 3, "y": 3}}
+    assert validate_positions(state, positions) is None
+
+
+def test_water_placement_rejected():
+    actors = [
+        {"id": "p1", "type": "player", "position": {"x": 0, "y": 0}},
+        {"id": "e1", "type": "enemy", "position": {"x": 4, "y": 0}},
+    ]
+    state = apply_terrain_cells(_state(actors=actors), [_terrain_cell(2, 2, TERRAIN_WATER)])
+    positions = {"p1": {"x": 2, "y": 2}, "e1": {"x": 3, "y": 3}}
+    assert validate_positions(state, positions) == "Position blocked by terrain for p1"
+
+
+def test_validate_terrain_cells_bounds():
+    state = _state()
+    assert validate_terrain_cells(state, [_terrain_cell(10, 0, TERRAIN_WALL)]) == "Terrain out of bounds"
+    assert validate_terrain_cells(state, [_terrain_cell(1, 1, TERRAIN_WALL)]) is None
+    assert blocked_cells_set(apply_terrain_cells(state, [_terrain_cell(1, 1, TERRAIN_WALL), _terrain_cell(1, 1, TERRAIN_WALL)])) == {(1, 1)}
