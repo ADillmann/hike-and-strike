@@ -22,6 +22,41 @@ interface SecretOption {
 
 const ITEM_TYPES = ['weapon', 'shield', 'head', 'armor', 'gloves', 'legs', 'shoes', 'ring', 'necklace', 'spell', 'consumable', 'key', 'secret'];
 
+type PoolFilter =
+  | 'all'
+  | 'weapon_melee'
+  | 'weapon_range'
+  | (typeof ITEM_TYPES)[number];
+
+const POOL_FILTER_OPTIONS: { id: PoolFilter; label: string }[] = [
+  { id: 'all', label: 'All items' },
+  { id: 'weapon_melee', label: 'Melee weapons' },
+  { id: 'weapon_range', label: 'Ranged weapons' },
+  { id: 'shield', label: 'Shields' },
+  { id: 'head', label: 'Head' },
+  { id: 'armor', label: 'Armor' },
+  { id: 'gloves', label: 'Gloves' },
+  { id: 'legs', label: 'Legs' },
+  { id: 'shoes', label: 'Shoes' },
+  { id: 'ring', label: 'Rings' },
+  { id: 'necklace', label: 'Necklaces' },
+  { id: 'spell', label: 'Spells' },
+  { id: 'consumable', label: 'Consumables' },
+  { id: 'key', label: 'Keys' },
+  { id: 'secret', label: 'Secrets' },
+];
+
+function matchesPoolFilter(item: Item, filter: PoolFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'weapon_melee') {
+    return item.item_type === 'weapon' && item.stats?.weapon_class !== 'range';
+  }
+  if (filter === 'weapon_range') {
+    return item.item_type === 'weapon' && item.stats?.weapon_class === 'range';
+  }
+  return item.item_type === filter;
+}
+
 const STAT_FIELDS = [
   { key: 'strength', label: 'Strength' },
   { key: 'dexterity', label: 'Dexterity' },
@@ -373,6 +408,9 @@ export default function ItemsPage() {
   const [form, setForm] = useState<ItemForm>(defaultForm);
   const [editing, setEditing] = useState<{ id: number; is_system: boolean; form: ItemForm } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [poolFilter, setPoolFilter] = useState<PoolFilter>('all');
+
+  const filteredItems = items.filter((item) => matchesPoolFilter(item, poolFilter));
 
   const load = () => {
     api.get<Item[]>('/items').then(setItems);
@@ -422,9 +460,30 @@ export default function ItemsPage() {
         </form>
 
         <section className="card">
-          <h2 className="mb-3 font-semibold text-dungeon-300">Item Pool</h2>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <h2 className="font-semibold text-dungeon-300">Item Pool</h2>
+            <div className="flex min-w-[12rem] flex-1 flex-col gap-1 sm:max-w-xs">
+              <label className="label" htmlFor="pool-filter">Filter by type</label>
+              <select
+                id="pool-filter"
+                className="input"
+                value={poolFilter}
+                onChange={(e) => setPoolFilter(e.target.value as PoolFilter)}
+              >
+                {POOL_FILTER_OPTIONS.map(({ id, label }) => (
+                  <option key={id} value={id}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p className="mb-2 text-xs text-stone-500">
+            Showing {filteredItems.length} of {items.length} items
+          </p>
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
-            {items.map((item) => {
+            {filteredItems.length === 0 ? (
+              <p className="text-sm text-stone-500">No items match this filter.</p>
+            ) : null}
+            {filteredItems.map((item) => {
               const statLines = formatItemStats(item.item_type, item.stats);
               return (
                 <div key={item.id} className="rounded border border-dungeon-600 p-2 text-sm">
