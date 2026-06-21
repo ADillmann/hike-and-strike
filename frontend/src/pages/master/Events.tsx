@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout } from '../../components/Layout';
+import { EffectTemplate, EventOutcomeRewardBuilder } from '../../components/RewardsPanel';
 
 interface EventTemplate {
   id: number;
@@ -19,6 +20,8 @@ interface BattleConfig {
   preset?: string;
   group_initiative_bonus?: number;
   enemy_initiative_bonus?: number;
+  victory_rewards?: Record<string, unknown>;
+  defeat_punishments?: Record<string, unknown>;
 }
 
 interface ShopConfig {
@@ -41,10 +44,12 @@ function BattleConfigEditor({
   config,
   onChange,
   presets,
+  effects,
 }: {
   config: BattleConfig;
   onChange: (config: BattleConfig) => void;
   presets: { id: string; name: string }[];
+  effects: EffectTemplate[];
 }) {
   return (
     <fieldset className="space-y-2 rounded border border-dungeon-700 p-3">
@@ -65,6 +70,19 @@ function BattleConfigEditor({
           <input className="input" type="number" step={0.1} value={config.enemy_initiative_bonus ?? 0} onChange={(e) => onChange({ ...config, enemy_initiative_bonus: +e.target.value })} />
         </div>
       </div>
+      <EventOutcomeRewardBuilder
+        mode="rewards"
+        value={config.victory_rewards}
+        effects={effects}
+        onChange={(victory_rewards) => onChange({ ...config, victory_rewards })}
+      />
+      <EventOutcomeRewardBuilder
+        mode="punishments"
+        value={config.defeat_punishments}
+        effects={effects}
+        onChange={(defeat_punishments) => onChange({ ...config, defeat_punishments })}
+      />
+      <p className="text-xs text-stone-500">Victory/defeat outcomes apply automatically when a linked battle ends.</p>
     </fieldset>
   );
 }
@@ -118,6 +136,7 @@ function ShopConfigEditor({
 export default function EventsPage() {
   const [events, setEvents] = useState<EventTemplate[]>([]);
   const [presets, setPresets] = useState<{ id: string; name: string }[]>([]);
+  const [effects, setEffects] = useState<EffectTemplate[]>([]);
   const [form, setForm] = useState({ name: '', description: '', event_type: 'story', shop_config: defaultShopConfig(), battle_config: defaultBattleConfig() });
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [editing, setEditing] = useState<EventTemplate | null>(null);
@@ -127,7 +146,11 @@ export default function EventsPage() {
 
   const load = () => api.get<EventTemplate[]>('/events').then(setEvents);
 
-  useEffect(() => { load(); api.get<{ id: string; name: string }[]>('/enemies/presets').then(setPresets); }, []);
+  useEffect(() => {
+    load();
+    api.get<{ id: string; name: string }[]>('/enemies/presets').then(setPresets);
+    api.get<EffectTemplate[]>('/effects').then(setEffects);
+  }, []);
 
   const uploadImage = async (eventId: number, file: File) => {
     setError('');
@@ -234,6 +257,7 @@ export default function EventsPage() {
               config={form.battle_config}
               onChange={(battle_config) => setForm({ ...form, battle_config })}
               presets={presets}
+              effects={effects}
             />
           )}
           <div>
@@ -335,6 +359,7 @@ export default function EventsPage() {
                 config={editing.battle_config || defaultBattleConfig()}
                 onChange={(battle_config) => setEditing({ ...editing, battle_config })}
                 presets={presets}
+                effects={effects}
               />
             )}
             {editing.images?.length > 0 ? (

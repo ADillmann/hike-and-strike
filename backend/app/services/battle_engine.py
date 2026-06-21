@@ -440,6 +440,25 @@ def pick_enemy_target(state: dict, enemy: dict) -> dict | None:
     return min(attackable, key=lambda p: chebyshev_distance((ex, ey), actor_pos(p)))
 
 
+def pick_enemy_move_dest(state: dict, enemy: dict) -> tuple[int, int] | None:
+    """Best reachable cell within move range that gets closer to the nearest player."""
+    target = pick_enemy_target(state, enemy)
+    if not target:
+        return None
+    tx, ty = actor_pos(target)
+    ex, ey = actor_pos(enemy)
+    current_dist = chebyshev_distance((ex, ey), (tx, ty))
+    reachable = reachable_cells(state, enemy, MOVE_MAX_STEPS)
+    best: tuple[int, int] | None = None
+    best_dist = current_dist
+    for cell in reachable:
+        dist = chebyshev_distance(cell, (tx, ty))
+        if dist < best_dist:
+            best_dist = dist
+            best = cell
+    return best
+
+
 def _move_actor(actor: dict, dest: tuple[int, int]) -> int:
     start = actor_pos(actor)
     set_actor_pos(actor, dest[0], dest[1])
@@ -771,6 +790,17 @@ def perform_action(
                 return {**state, "actors": actors}, "No valid target"
             log_msg = _execute_melee_attack(state, actor, target, None, is_enemy=True)
 
+        elif action == "enemy_move":
+            if actor["type"] != "enemy":
+                return {**state, "actors": actors}, "Not an enemy"
+            dest = pick_enemy_move_dest({**state, "actors": actors}, actor)
+            if dest is None:
+                return {**state, "actors": actors}, "No move available"
+            mx, my = dest
+            if _move_actor_path(state, actor, dest) < 0:
+                return {**state, "actors": actors}, "No move available"
+            log_msg = f"{actor['name']} moves toward the party ({mx}, {my})."
+
         else:
             return {**state, "actors": actors}, f"Unknown action: {action}"
     except ValueError as exc:
@@ -789,6 +819,28 @@ def perform_action(
     return state, "ok"
 
 
+def _enemy_has_melee_target(state: dict[str, Any], enemy: dict) -> bool:
+    for other in state.get("actors", []):
+        if other.get("type") != "player" or not other.get("alive"):
+            continue
+        if can_melee_attack(state, enemy, other):
+            return True
+    return False
+
+
+def _enemy_wait_turn(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
+    state = dict(state)
+    name = _actor_name(state, actor_id)
+    state["log"] = state.get("log", []) + [_log_entry(f"{name} cannot reach anyone and waits.")]
+    state = _check_battle_end(state)
+    if state.get("status") == "active":
+        state = _advance_turn(state)
+        next_name = _actor_name(state, state.get("active_actor_id"))
+        if next_name:
+            state["log"] = state.get("log", []) + [_log_entry(f"{next_name}'s turn.")]
+    return state
+
+
 def resolve_auto_turns(state: dict[str, Any], max_iters: int = 30) -> dict[str, Any]:
     iters = 0
     while state.get("status") == "active" and iters < max_iters:
@@ -796,9 +848,14 @@ def resolve_auto_turns(state: dict[str, Any], max_iters: int = 30) -> dict[str, 
         actor = _get_actor(state, active_id)
         if not actor or actor["type"] != "enemy":
             break
-        state, msg = perform_action(state, active_id, "enemy_attack")
+        if _enemy_has_melee_target(state, actor):
+            state, msg = perform_action(state, active_id, "enemy_attack")
+        else:
+            state, msg = perform_action(state, active_id, "enemy_move")
+            if msg != "ok":
+                state, msg = perform_action(state, active_id, "enemy_attack")
         if msg != "ok":
-            break
+            state = _enemy_wait_turn(state, active_id)
         iters += 1
     return state
 
@@ -841,9 +898,18 @@ def battle_action_hints(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
         "melee_targets": [],
         "range_targets": [],
         "skill_range_targets": [],
+        "ally_targets": [],
         "can_melee": bool(wp.get("can_melee")),
         "can_ranged": bool(wp.get("can_ranged")),
     }
+    for other in state.get("actors", []):
+        if other.get("type") == "player" and other.get("alive"):
+            hints["ally_targets"].append({
+                "id": other["id"],
+                "name": other.get("name", "Ally"),
+                "current_hp": other.get("current_hp", 0),
+                "max_hp": other.get("max_hp", 0),
+            })
     max_range = int(wp.get("weapon_range", DEFAULT_RANGE_DISTANCE))
     for other in state.get("actors", []):
         if other["id"] == actor_id or not other["alive"]:

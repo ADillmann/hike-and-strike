@@ -635,3 +635,223 @@ export function buildAdvanceRewards(
     punishments: pendingRewards.punishments,
   };
 }
+
+type OutcomeRewardType = 'none' | 'xp' | 'currency' | 'random' | 'effect' | 'hp' | 'currency_loss';
+
+export function formatOutcomeSummary(payload: Record<string, unknown> | null | undefined): string[] {
+  if (!payload) return [];
+  const lines: string[] = [];
+
+  const xp = payload.xp as { amount?: number; whole_party?: boolean }[] | undefined;
+  if (xp?.length) {
+    for (const entry of xp) {
+      if (typeof entry.amount === 'number' && entry.amount > 0) {
+        lines.push(`+${entry.amount} XP${entry.whole_party ? ' (whole party)' : ''}`);
+      }
+    }
+  }
+
+  const wallet = payload.wallet as { amount?: number; whole_party?: boolean }[] | undefined;
+  if (wallet?.length) {
+    for (const entry of wallet) {
+      if (typeof entry.amount === 'number' && entry.amount > 0) {
+        lines.push(`+${entry.amount} copper${entry.whole_party ? ' (whole party)' : ''}`);
+      }
+    }
+  }
+
+  const randomTier = payload.random_tier as { tier?: number; count?: number; whole_party?: boolean }[] | undefined;
+  if (randomTier?.length) {
+    for (const entry of randomTier) {
+      const tier = entry.tier ?? 1;
+      const count = entry.count ?? 1;
+      lines.push(`Random tier ${tier} loot ×${count}${entry.whole_party !== false ? ' (whole party)' : ''}`);
+    }
+  }
+
+  const tempEffects = payload.temp_effects as { effect_template_id?: number; whole_party?: boolean }[] | undefined;
+  if (tempEffects?.length) {
+    for (const entry of tempEffects) {
+      lines.push(`Party effect applied${entry.whole_party ? ' (whole party)' : ''}`);
+    }
+  }
+
+  const hpReduction = payload.hp_reduction as { amount?: number; whole_party?: boolean }[] | undefined;
+  if (hpReduction?.length) {
+    for (const entry of hpReduction) {
+      if (typeof entry.amount === 'number' && entry.amount !== 0) {
+        lines.push(`${entry.amount > 0 ? '+' : ''}${entry.amount} HP${entry.whole_party ? ' (whole party)' : ''}`);
+      }
+    }
+  }
+
+  const walletReduction = payload.wallet_reduction as { amount?: number; whole_party?: boolean }[] | undefined;
+  if (walletReduction?.length) {
+    for (const entry of walletReduction) {
+      if (typeof entry.amount === 'number' && entry.amount > 0) {
+        lines.push(`−${entry.amount} copper${entry.whole_party ? ' (whole party)' : ''}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
+export function EventOutcomeRewardBuilder({
+  mode,
+  value,
+  onChange,
+  effects,
+}: {
+  mode: 'rewards' | 'punishments';
+  value?: Record<string, unknown> | null;
+  onChange: (value: Record<string, unknown> | undefined) => void;
+  effects: EffectTemplate[];
+}) {
+  const detectType = (): OutcomeRewardType => {
+    if (!value) return 'none';
+    if (mode === 'rewards') {
+      if (value.xp) return 'xp';
+      if (value.wallet) return 'currency';
+      if (value.random_tier) return 'random';
+      if (value.temp_effects) return 'effect';
+    } else {
+      if (value.hp_reduction) return 'hp';
+      if (value.wallet_reduction) return 'currency_loss';
+    }
+    return 'none';
+  };
+
+  const [enabled, setEnabled] = useState(detectType() !== 'none');
+  const [rewardType, setRewardType] = useState<OutcomeRewardType>(detectType() === 'none' ? (mode === 'rewards' ? 'xp' : 'hp') : detectType());
+  const [xpAmount, setXpAmount] = useState(100);
+  const [currencyAmount, setCurrencyAmount] = useState(100);
+  const [tier, setTier] = useState(1);
+  const [randomCount, setRandomCount] = useState(1);
+  const [effectTemplateId, setEffectTemplateId] = useState(effects[0]?.id || 0);
+  const [hpChange, setHpChange] = useState(-5);
+
+  useEffect(() => {
+    if (effects[0]) setEffectTemplateId(effects[0].id);
+  }, [effects]);
+
+  useEffect(() => {
+    if (!enabled) {
+      onChange(undefined);
+      return;
+    }
+    if (mode === 'rewards') {
+      if (rewardType === 'xp' && xpAmount > 0) {
+        onChange({ xp: [{ amount: xpAmount, whole_party: true }] });
+        return;
+      }
+      if (rewardType === 'currency' && currencyAmount > 0) {
+        onChange({ wallet: [{ amount: currencyAmount, whole_party: true }] });
+        return;
+      }
+      if (rewardType === 'random') {
+        onChange({ random_tier: [{ tier, count: randomCount, whole_party: true }] });
+        return;
+      }
+      if (rewardType === 'effect' && effectTemplateId) {
+        onChange({ temp_effects: [{ effect_template_id: effectTemplateId, whole_party: true }] });
+        return;
+      }
+    } else {
+      if (rewardType === 'hp' && hpChange !== 0) {
+        onChange({ hp_reduction: [{ amount: hpChange, whole_party: true }] });
+        return;
+      }
+      if (rewardType === 'currency_loss' && currencyAmount > 0) {
+        onChange({ wallet_reduction: [{ amount: currencyAmount, whole_party: true }] });
+        return;
+      }
+    }
+    onChange(undefined);
+  }, [
+    enabled,
+    mode,
+    rewardType,
+    xpAmount,
+    currencyAmount,
+    tier,
+    randomCount,
+    effectTemplateId,
+    hpChange,
+  ]);
+
+  const rewardOptions: OutcomeRewardType[] = mode === 'rewards'
+    ? ['xp', 'currency', 'random', 'effect']
+    : ['hp', 'currency_loss'];
+
+  return (
+    <div className="space-y-2 rounded border border-dungeon-700 p-3">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        {mode === 'rewards' ? 'Apply victory rewards' : 'Apply defeat punishments'}
+      </label>
+      {enabled && (
+        <>
+          <select
+            className="input"
+            value={rewardType}
+            onChange={(e) => setRewardType(e.target.value as OutcomeRewardType)}
+          >
+            {rewardOptions.map((t) => (
+              <option key={t} value={t}>
+                {t === 'xp' && 'Grant XP (whole party)'}
+                {t === 'currency' && 'Grant copper (whole party)'}
+                {t === 'random' && 'Random tier loot (whole party)'}
+                {t === 'effect' && 'Apply effect (whole party)'}
+                {t === 'hp' && 'HP change (whole party)'}
+                {t === 'currency_loss' && 'Reduce copper (whole party)'}
+              </option>
+            ))}
+          </select>
+          {rewardType === 'xp' && (
+            <div>
+              <label className="label">XP per character</label>
+              <input className="input" type="number" min={1} value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} />
+            </div>
+          )}
+          {(rewardType === 'currency' || rewardType === 'currency_loss') && (
+            <div>
+              <label className="label">Copper per character</label>
+              <input className="input" type="number" min={1} value={currencyAmount} onChange={(e) => setCurrencyAmount(+e.target.value)} />
+            </div>
+          )}
+          {rewardType === 'random' && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="label">Tier</label>
+                <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Count each</label>
+                <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
+              </div>
+            </div>
+          )}
+          {rewardType === 'effect' && (
+            <select className="input" value={effectTemplateId} onChange={(e) => setEffectTemplateId(+e.target.value)}>
+              {effects.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          )}
+          {rewardType === 'hp' && (
+            <div>
+              <label className="label">HP change (negative = damage)</label>
+              <input className="input" type="number" value={hpChange} onChange={(e) => setHpChange(+e.target.value)} />
+            </div>
+          )}
+          {value && formatOutcomeSummary(value).length > 0 && (
+            <p className="text-xs text-stone-500">{formatOutcomeSummary(value).join(' · ')}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

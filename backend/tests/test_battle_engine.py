@@ -3,6 +3,7 @@
 from app.services.battle_engine import (
     apply_prebattle_move,
     perform_action,
+    pick_enemy_move_dest,
     resolve_auto_turns,
     start_battle,
     update_battle_positions,
@@ -68,6 +69,25 @@ def _minimal_state(
     }
 
 
+def _blocker_enemy(eid: str, x: int, y: int) -> dict:
+    return {
+        "id": eid,
+        "type": "enemy",
+        "name": "Blocker",
+        "alive": True,
+        "initiative": 1,
+        "initiative_stat": 1,
+        "initiative_value": 0.1,
+        "per_turn_value": 0.1,
+        "current_hp": 10,
+        "max_hp": 10,
+        "position": {"x": x, "y": y},
+        "guarding": False,
+        "attack_bonus": 1,
+        "stats": {"strength": 5},
+    }
+
+
 def test_update_battle_positions():
     state = _minimal_state(phase="setup")
     positions = {
@@ -127,6 +147,106 @@ def test_use_item_heals_self():
     assert hero["consumables"][0]["quantity"] == 0
 
 
+def test_use_item_heals_ally():
+    ally = {
+        "id": "player_2_0",
+        "type": "player",
+        "name": "Cleric",
+        "alive": True,
+        "initiative_value": 3.0,
+        "per_turn_value": 0.4,
+        "current_hp": 8,
+        "max_hp": 20,
+        "position": {"x": 1, "y": 2},
+        "guarding": False,
+        "consumables": [],
+        "skills": [],
+        "stats": {},
+        "battle_modifiers": {},
+    }
+    state = _minimal_state(phase=None, status="active", active_actor_id="player_1_0")
+    state["actors"].append(ally)
+    state["actors"][1]["alive"] = False
+    new_state, msg = perform_action(
+        state,
+        "player_1_0",
+        "use_item",
+        target_id="player_2_0",
+        inventory_item_id=1,
+    )
+    assert msg == "ok"
+    cleric = next(a for a in new_state["actors"] if a["id"] == "player_2_0")
+    assert cleric["current_hp"] == 13
+    hero = next(a for a in new_state["actors"] if a["id"] == "player_1_0")
+    assert hero["consumables"][0]["quantity"] == 0
+
+
+def test_heal_skill_on_ally():
+    ally = {
+        "id": "player_2_0",
+        "type": "player",
+        "name": "Cleric",
+        "alive": True,
+        "initiative_value": 3.0,
+        "per_turn_value": 0.4,
+        "current_hp": 5,
+        "max_hp": 20,
+        "position": {"x": 1, "y": 2},
+        "guarding": False,
+        "consumables": [],
+        "skills": [],
+        "stats": {"intelligence": 10},
+        "battle_modifiers": {},
+    }
+    state = _minimal_state(phase=None, status="active", active_actor_id="player_1_0")
+    state["actors"][0]["skills"] = [
+        {
+            "id": 42,
+            "name": "Minor Heal",
+            "uses_remaining": 1,
+            "effect_type": "heal",
+            "effect_params": {"heal_base": 6},
+        }
+    ]
+    state["actors"].append(ally)
+    state["actors"][1]["alive"] = False
+    new_state, msg = perform_action(
+        state,
+        "player_1_0",
+        "skill",
+        target_id="player_2_0",
+        skill_id=42,
+    )
+    assert msg == "ok"
+    cleric = next(a for a in new_state["actors"] if a["id"] == "player_2_0")
+    assert cleric["current_hp"] > 5
+    assert any("Minor Heal" in e["message"] for e in new_state["log"])
+
+
+def test_enemy_moves_when_out_of_melee_range():
+    hero = _minimal_state()["actors"][0]
+    hero["position"] = {"x": 4, "y": 4}
+    hunter = _minimal_state()["actors"][1]
+    hunter["id"] = "enemy_hunter"
+    hunter["name"] = "Hunter"
+    hunter["position"] = {"x": 0, "y": 0}
+    hunter["initiative_value"] = 10.0
+    blockers = [
+        _blocker_enemy("block_1", 3, 3),
+        _blocker_enemy("block_2", 3, 4),
+        _blocker_enemy("block_3", 4, 3),
+    ]
+    state = _minimal_state(
+        phase=None,
+        status="active",
+        active_actor_id="enemy_hunter",
+        actors=[hero, hunter, *blockers],
+    )
+    new_state = resolve_auto_turns(state)
+    assert new_state["active_actor_id"] != "enemy_hunter"
+    assert any("moves toward" in e["message"] for e in new_state["log"])
+
+
 def test_enemy_auto_turn_resolves():
     state = _minimal_state(phase=None, status="active", active_actor_id="enemy_1_0")
     new_state = resolve_auto_turns(state)
@@ -146,5 +266,94 @@ def test_melee_attack_with_charge():
         charge_cell={"x": 2, "y": 2},
     )
     assert msg == "ok"
+    enemy = next(a for a in new_state["actors"] if a["id"] == "enemy_1_0")
+    assert enemy["current_hp"] < 10
+
+
+def test_enemy_moves_when_melee_blocked():
+    hero = _minimal_state()["actors"][0]
+    hero["position"] = {"x": 4, "y": 2}
+    hunter = _minimal_state()["actors"][1]
+    hunter["id"] = "enemy_hunter"
+    hunter["name"] = "Hunter"
+    hunter["position"] = {"x": 0, "y": 2}
+    hunter["initiative_value"] = 10.0
+    blockers = [
+        _blocker_enemy("block_1", 3, 1),
+        _blocker_enemy("block_2", 3, 2),
+        _blocker_enemy("block_3", 3, 3),
+        _blocker_enemy("block_4", 4, 1),
+        _blocker_enemy("block_5", 4, 3),
+    ]
+    state = _minimal_state(
+        phase=None,
+        status="active",
+        active_actor_id="enemy_hunter",
+        actors=[hero, hunter, *blockers],
+    )
+    dest = pick_enemy_move_dest(state, hunter)
+    assert dest is not None
+    new_state = resolve_auto_turns(state)
+    assert new_state["active_actor_id"] != "enemy_hunter"
+    assert any("moves toward" in e["message"] for e in new_state["log"])
+
+
+def test_enemy_turn_advances_when_stuck():
+    hero = _minimal_state()["actors"][0]
+    hero["position"] = {"x": 4, "y": 4}
+    stuck = _minimal_state()["actors"][1]
+    stuck["id"] = "enemy_stuck"
+    stuck["name"] = "Stuck"
+    stuck["position"] = {"x": 2, "y": 2}
+    stuck["initiative_value"] = 10.0
+    ring = [
+        _blocker_enemy("ring_1", 1, 1),
+        _blocker_enemy("ring_2", 2, 1),
+        _blocker_enemy("ring_3", 3, 1),
+        _blocker_enemy("ring_4", 1, 2),
+        _blocker_enemy("ring_5", 3, 2),
+        _blocker_enemy("ring_6", 1, 3),
+        _blocker_enemy("ring_7", 2, 3),
+        _blocker_enemy("ring_8", 3, 3),
+        _blocker_enemy("charge_1", 3, 4),
+        _blocker_enemy("charge_2", 4, 3),
+    ]
+    state = _minimal_state(
+        phase=None,
+        status="active",
+        active_actor_id="enemy_stuck",
+        actors=[hero, stuck, *ring],
+    )
+    assert pick_enemy_move_dest(state, stuck) is None
+    new_state = resolve_auto_turns(state)
+    assert new_state["active_actor_id"] != "enemy_stuck"
+    assert any("waits" in e["message"] for e in new_state["log"])
+
+
+def test_melee_skill_with_charge():
+    state = _minimal_state(phase=None, status="active", active_actor_id="player_1_0")
+    state["actors"][0]["position"] = {"x": 0, "y": 2}
+    state["actors"][0]["skills"] = [
+        {
+            "id": 99,
+            "name": "Power Strike",
+            "uses_remaining": 1,
+            "effect_type": "melee",
+            "effect_params": {"bonus_damage": 2},
+        }
+    ]
+    state["actors"][1]["position"] = {"x": 3, "y": 2}
+    state["actors"][1]["alive"] = True
+    new_state, msg = perform_action(
+        state,
+        "player_1_0",
+        "skill",
+        target_id="enemy_1_0",
+        skill_id=99,
+        charge_cell={"x": 2, "y": 2},
+    )
+    assert msg == "ok"
+    hero = next(a for a in new_state["actors"] if a["id"] == "player_1_0")
+    assert hero["skills"][0]["uses_remaining"] == 0
     enemy = next(a for a in new_state["actors"] if a["id"] == "enemy_1_0")
     assert enemy["current_hp"] < 10

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { BattleGrid, GridActor } from '../components/BattleGrid';
 import { Layout } from '../components/Layout';
+import { formatOutcomeSummary } from '../components/RewardsPanel';
 import { useCampaignSocket } from '../hooks/useCampaignSocket';
 
 interface Actor {
@@ -41,6 +42,7 @@ interface ActionHints {
   melee_targets: { id: string; charge_cells: { x: number; y: number }[] }[];
   range_targets: string[];
   skill_range_targets?: string[];
+  ally_targets?: { id: string; name: string; current_hp: number; max_hp: number }[];
   can_melee?: boolean;
   can_ranged?: boolean;
 }
@@ -57,6 +59,7 @@ interface BattleState {
   prebattle_pending?: string[];
   victory_rewards?: Record<string, unknown>;
   defeat_punishments?: Record<string, unknown>;
+  outcome_rewards_applied?: boolean;
 }
 
 interface PrebattleHints {
@@ -77,7 +80,7 @@ interface BattleResponse {
   prebattle_hints?: PrebattleHints | null;
 }
 
-type ActionMode = 'idle' | 'attack' | 'attack_charge' | 'ranged_attack' | 'move' | 'guard' | 'skill' | 'item';
+type ActionMode = 'idle' | 'attack' | 'attack_charge' | 'skill_charge' | 'ranged_attack' | 'move' | 'guard' | 'skill' | 'ally_skill' | 'item';
 
 function normalizeEffect(type?: string): string {
   if (type === 'power_strike') return 'melee';
@@ -94,7 +97,7 @@ export default function BattlePage() {
   const [mode, setMode] = useState<ActionMode>('idle');
   const [targetId, setTargetId] = useState('');
   const [skillId, setSkillId] = useState<number | null>(null);
-  const [pendingCell, setPendingCell] = useState<{ x: number; y: number } | null>(null);
+  const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [selectedPrebattleActorId, setSelectedPrebattleActorId] = useState('');
 
   const load = () => {
@@ -114,7 +117,7 @@ export default function BattlePage() {
     setMode('idle');
     setTargetId('');
     setSkillId(null);
-    setPendingCell(null);
+    setPendingItemId(null);
   };
 
   const postAction = async (body: Record<string, unknown>) => {
@@ -189,6 +192,10 @@ export default function BattlePage() {
     const t = hints.melee_targets.find((m) => m.id === targetId);
     if (t) highlightCells = t.charge_cells;
   }
+  if (mode === 'skill_charge' && targetId && hints) {
+    const t = hints.melee_targets.find((m) => m.id === targetId);
+    if (t) highlightCells = t.charge_cells;
+  }
 
   const onCellClick = async (x: number, y: number) => {
     if (isPrebattle && prebattleActorId) {
@@ -210,11 +217,11 @@ export default function BattlePage() {
         target_id: targetId,
         charge_cell: { x, y },
       });
-    } else if (mode === 'skill' && skillId && pendingCell) {
+    } else if (mode === 'skill_charge' && targetId && skillId) {
       await postAction({
         action: 'skill',
         actor_id: state.active_actor_id,
-        target_id: targetId || undefined,
+        target_id: targetId,
         skill_id: skillId,
         charge_cell: { x, y },
       });
@@ -355,11 +362,20 @@ export default function BattlePage() {
                       key={c.inventory_item_id}
                       type="button"
                       className="btn-secondary text-xs"
-                      onClick={() => postAction({
-                        action: 'use_item',
-                        actor_id: state.active_actor_id,
-                        inventory_item_id: c.inventory_item_id,
-                      })}
+                      onClick={() => {
+                        const allies = hints?.ally_targets || [];
+                        if (allies.length <= 1) {
+                          postAction({
+                            action: 'use_item',
+                            actor_id: state.active_actor_id,
+                            inventory_item_id: c.inventory_item_id,
+                            target_id: allies[0]?.id,
+                          });
+                        } else {
+                          setPendingItemId(c.inventory_item_id);
+                          setMode('item');
+                        }
+                      }}
                     >
                       {c.name}
                     </button>
@@ -372,7 +388,13 @@ export default function BattlePage() {
                       onClick={() => {
                         const eff = normalizeEffect(s.effect_type);
                         if (eff === 'heal' || eff === 'support') {
-                          postAction({ action: 'skill', actor_id: state.active_actor_id, skill_id: s.id });
+                          const allies = hints?.ally_targets || [];
+                          if (allies.length <= 1) {
+                            postAction({ action: 'skill', actor_id: state.active_actor_id, skill_id: s.id });
+                          } else {
+                            setSkillId(s.id);
+                            setMode('ally_skill');
+                          }
                         } else {
                           setSkillId(s.id);
                           setMode('skill');
@@ -425,8 +447,59 @@ export default function BattlePage() {
               {mode === 'attack_charge' && (
                 <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge.</p>
               )}
+              {mode === 'skill_charge' && (
+                <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge with your skill.</p>
+              )}
               {(mode === 'move' || mode === 'guard') && (
                 <p className="text-sm text-stone-400">Click a highlighted cell to {mode === 'move' ? 'move' : 'guard'}.</p>
+              )}
+              {mode === 'ally_skill' && skillId && (
+                <div className="space-y-2">
+                  <p className="text-sm text-stone-400">Select ally to target:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(hints?.ally_targets || []).map((ally) => (
+                      <button
+                        key={ally.id}
+                        type="button"
+                        className="btn-primary text-xs"
+                        onClick={() => postAction({
+                          action: 'skill',
+                          actor_id: state.active_actor_id,
+                          skill_id: skillId,
+                          target_id: ally.id,
+                        })}
+                      >
+                        {ally.name} ({ally.current_hp}/{ally.max_hp})
+                        {ally.id === state.active_actor_id ? ' — you' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                </div>
+              )}
+              {mode === 'item' && pendingItemId && (
+                <div className="space-y-2">
+                  <p className="text-sm text-stone-400">Select ally to heal:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(hints?.ally_targets || []).map((ally) => (
+                      <button
+                        key={ally.id}
+                        type="button"
+                        className="btn-primary text-xs"
+                        onClick={() => postAction({
+                          action: 'use_item',
+                          actor_id: state.active_actor_id,
+                          inventory_item_id: pendingItemId,
+                          target_id: ally.id,
+                        })}
+                      >
+                        {ally.name} ({ally.current_hp}/{ally.max_hp})
+                        {ally.id === state.active_actor_id ? ' — you' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                </div>
               )}
               {mode === 'skill' && skillId && (
                 <div className="space-y-2">
@@ -450,7 +523,7 @@ export default function BattlePage() {
                       <button key={t.id} type="button" className="btn-primary mr-2 text-xs" onClick={() => {
                         if (t.charge_cells.length) {
                           setTargetId(t.id);
-                          setMode('attack_charge');
+                          setMode('skill_charge');
                         } else {
                           postAction({ action: 'skill', actor_id: state.active_actor_id, target_id: t.id, skill_id: skillId });
                         }
@@ -462,7 +535,7 @@ export default function BattlePage() {
                   <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
                 </div>
               )}
-              {mode !== 'idle' && mode !== 'attack' && mode !== 'ranged_attack' && (
+              {mode !== 'idle' && mode !== 'attack' && mode !== 'ranged_attack' && mode !== 'attack_charge' && mode !== 'skill_charge' && mode !== 'ally_skill' && mode !== 'item' && (
                 <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
               )}
             </div>
@@ -500,8 +573,25 @@ export default function BattlePage() {
             {state.status === 'completed' && (
               <div className="mt-3 text-dungeon-300">
                 <p>{state.winner === 'party' ? 'Victory!' : state.winner === 'enemies' ? 'Defeat...' : 'Battle ended.'}</p>
-                {state.winner === 'party' && state.victory_rewards && battle.is_master && (
-                  <p className="mt-1 text-xs text-green-400">Victory rewards were applied.</p>
+                {state.winner === 'party' && state.victory_rewards && formatOutcomeSummary(state.victory_rewards).length > 0 && (
+                  <div className="mt-2 rounded border border-green-900/50 bg-green-950/30 p-2 text-sm">
+                    <p className="text-green-400">Victory rewards applied</p>
+                    <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
+                      {formatOutcomeSummary(state.victory_rewards).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {state.winner === 'enemies' && state.defeat_punishments && formatOutcomeSummary(state.defeat_punishments).length > 0 && (
+                  <div className="mt-2 rounded border border-red-900/50 bg-red-950/30 p-2 text-sm">
+                    <p className="text-red-400">Defeat consequences applied</p>
+                    <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
+                      {formatOutcomeSummary(state.defeat_punishments).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}

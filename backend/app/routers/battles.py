@@ -110,8 +110,10 @@ async def _apply_outcome_rewards(db: Session, campaign: Campaign, state: dict, m
     winner = state.get("winner")
     if winner == "party" and state.get("victory_rewards"):
         apply_rewards_and_punishments(db, campaign, state["victory_rewards"], None, master_id)
+        state["outcome_rewards_applied"] = True
     elif winner == "enemies" and state.get("defeat_punishments"):
         apply_rewards_and_punishments(db, campaign, None, state["defeat_punishments"], master_id)
+        state["outcome_punishments_applied"] = True
 
 
 def _should_apply_event_preset(payload: BattleCreateRequest, battle_config: dict | None) -> bool:

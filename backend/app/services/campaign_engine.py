@@ -163,36 +163,47 @@ def apply_rewards_and_punishments(
 ) -> None:
     party_ids = [c.id for c in get_campaign_party(db, campaign)]
 
+    def _targets(entry: dict, *, default_party: bool = False) -> list[int]:
+        if entry.get("whole_party"):
+            return list(party_ids)
+        if entry.get("character_ids"):
+            return [cid for cid in entry["character_ids"] if cid]
+        char_id = entry.get("character_id")
+        if char_id:
+            return [char_id]
+        return list(party_ids) if default_party else []
+
     if rewards and rewards.get("xp"):
         if campaign_has_active_battle(db, campaign.id):
             raise ValueError("Cannot grant XP during an active battle")
         for entry in rewards.get("xp", []):
-            char_id = entry.get("character_id")
             amount = entry.get("amount", 0)
-            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+            if not isinstance(amount, (int, float)) or amount <= 0:
                 continue
-            character = db.get(Character, char_id)
-            if character:
-                grant_xp(db, character, int(amount), master_id, campaign.id)
+            for char_id in _targets(entry):
+                character = db.get(Character, char_id)
+                if character:
+                    grant_xp(db, character, int(amount), master_id, campaign.id)
 
     if rewards and rewards.get("wallet"):
         for entry in rewards.get("wallet", []):
-            char_id = entry.get("character_id")
             amount = entry.get("amount", 0)
-            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+            if not isinstance(amount, (int, float)) or amount <= 0:
                 continue
-            grant_wallet(db, char_id, int(amount))
+            for char_id in _targets(entry):
+                grant_wallet(db, char_id, int(amount))
 
     if rewards:
         for entry in rewards.get("items", []):
-            char_id = entry.get("character_id")
             item_id = entry.get("item_template_id")
-            if char_id and item_id:
+            if not item_id:
+                continue
+            for char_id in _targets(entry):
                 grant_item(db, char_id, item_id, entry.get("equipped_slot"))
         for entry in rewards.get("random_tier", []):
             tier = entry.get("tier", 1)
             count = entry.get("count", 1)
-            targets = entry.get("character_ids") or party_ids
+            targets = _targets(entry, default_party=True)
             pool = db.query(ItemTemplate).filter(ItemTemplate.tier == tier).all()
             if pool:
                 for char_id in targets:
@@ -200,8 +211,7 @@ def apply_rewards_and_punishments(
                         item = random.choice(pool)
                         grant_item(db, char_id, item.id)
         for entry in rewards.get("temp_buffs", []):
-            char_id = entry.get("character_id")
-            if char_id:
+            for char_id in _targets(entry):
                 db.add(
                     TemporaryEffect(
                         character_id=char_id,
@@ -211,29 +221,28 @@ def apply_rewards_and_punishments(
                     )
                 )
         for entry in rewards.get("temp_effects", []):
-            char_id = entry.get("character_id")
             template_id = entry.get("effect_template_id")
-            if char_id and template_id:
+            if not template_id:
+                continue
+            for char_id in _targets(entry):
                 apply_effect_template(db, char_id, template_id)
 
     if punishments:
         for entry in punishments.get("hp_reduction", []):
-            char_id = entry.get("character_id")
-            if not char_id:
+            if "amount" not in entry:
                 continue
-            character = db.get(Character, char_id)
-            if not character:
+            delta = entry["amount"]
+            if not isinstance(delta, (int, float)):
                 continue
-            if "amount" in entry:
-                delta = entry["amount"]
-                if isinstance(delta, (int, float)):
+            for char_id in _targets(entry):
+                character = db.get(Character, char_id)
+                if character:
                     character.current_hp = max(
                         0,
                         min(character.max_hp, character.current_hp + int(delta)),
                     )
         for entry in punishments.get("temp_debuffs", []):
-            char_id = entry.get("character_id")
-            if char_id:
+            for char_id in _targets(entry):
                 db.add(
                     TemporaryEffect(
                         character_id=char_id,
@@ -251,11 +260,11 @@ def apply_rewards_and_punishments(
                 else:
                     db.delete(inv)
         for entry in punishments.get("wallet_reduction", []):
-            char_id = entry.get("character_id")
             amount = entry.get("amount", 0)
-            if not char_id or not isinstance(amount, (int, float)) or amount <= 0:
+            if not isinstance(amount, (int, float)) or amount <= 0:
                 continue
-            grant_wallet(db, char_id, -int(amount))
+            for char_id in _targets(entry):
+                grant_wallet(db, char_id, -int(amount))
 
 
 def apply_rest_to_party(db: Session, campaign: Campaign) -> None:

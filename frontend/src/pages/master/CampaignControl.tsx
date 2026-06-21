@@ -79,6 +79,7 @@ export default function CampaignControlPage() {
   const [advanceRewards, setAdvanceRewards] = useState<RewardsPayload>({});
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   const [activeBattleId, setActiveBattleId] = useState<number | null>(null);
+  const [battleOutcome, setBattleOutcome] = useState<'party' | 'enemies' | null>(null);
   const [editChar, setEditChar] = useState<Character | null>(null);
   const [advanceConfirmOpen, setAdvanceConfirmOpen] = useState(false);
   const [addEventTemplateId, setAddEventTemplateId] = useState(0);
@@ -111,7 +112,7 @@ export default function CampaignControlPage() {
       if (evs[0]) setAddEventTemplateId(evs[0].id);
     });
     api.get<{ active: boolean; battle_id?: number }>(`/battles/campaigns/${campaignId}/active`).then((b) => {
-      if (b.active && b.battle_id) setActiveBattleId(b.battle_id);
+      setActiveBattleId(b.active && b.battle_id ? b.battle_id : null);
     });
   }, [campaignId, loadCampaignNodes]);
 
@@ -123,6 +124,21 @@ export default function CampaignControlPage() {
     if (msg.type === 'battle_started' && msg.data && typeof msg.data === 'object') {
       const d = msg.data as { battle_id: number };
       setActiveBattleId(d.battle_id);
+    }
+    if (msg.type === 'battle_updated' && msg.data && typeof msg.data === 'object') {
+      const d = msg.data as { battle_id: number; state?: { status?: string; winner?: string } };
+      const battleStatus = d.state?.status;
+      if (battleStatus === 'active' || battleStatus === 'pending') {
+        setActiveBattleId(d.battle_id);
+        setBattleOutcome(null);
+      } else if (battleStatus === 'completed') {
+        setActiveBattleId(null);
+        const winner = d.state?.winner;
+        if (winner === 'party' || winner === 'enemies') {
+          setBattleOutcome(winner);
+        }
+        load();
+      }
     }
     if (msg.type === 'battle_cancelled' && msg.data && typeof msg.data === 'object') {
       setActiveBattleId(null);
@@ -146,6 +162,7 @@ export default function CampaignControlPage() {
     await api.post(`/campaigns/${campaignId}/advance`, payload);
     setNotes('');
     setAdvanceRewards({});
+    setBattleOutcome(null);
     setAdvanceConfirmOpen(false);
     load();
   };
@@ -238,6 +255,20 @@ export default function CampaignControlPage() {
           {state.current_node?.event.event_type === 'battle_hook' && (
             <div className="mt-3 rounded border border-dungeon-500 p-3">
               <p className="text-dungeon-300 mb-2">Battle encounter</p>
+              {battleOutcome === 'party' && !activeBattleId && (
+                <div className="mb-3 rounded border border-green-800 bg-green-950/30 p-2 text-sm">
+                  <p className="text-green-400">Battle won — victory rewards were applied.</p>
+                  <p className="mt-1 text-xs text-stone-400">Advance the campaign when the party is ready.</p>
+                  <button type="button" className="btn-secondary mt-2 text-xs" onClick={() => setBattleOutcome(null)}>Dismiss</button>
+                </div>
+              )}
+              {battleOutcome === 'enemies' && !activeBattleId && (
+                <div className="mb-3 rounded border border-red-800 bg-red-950/30 p-2 text-sm">
+                  <p className="text-red-400">The party was defeated — defeat consequences were applied.</p>
+                  <p className="mt-1 text-xs text-stone-400">Advance or adjust the story when ready.</p>
+                  <button type="button" className="btn-secondary mt-2 text-xs" onClick={() => setBattleOutcome(null)}>Dismiss</button>
+                </div>
+              )}
               {activeBattleId ? (
                 <button className="btn-primary text-sm" onClick={() => navigate(`/battle/${activeBattleId}`)}>
                   Open Battle #{activeBattleId}
