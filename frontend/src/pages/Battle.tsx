@@ -88,6 +88,24 @@ function normalizeEffect(type?: string): string {
   return type || 'none';
 }
 
+function chebyshevCells(
+  cx: number,
+  cy: number,
+  radius: number,
+  width: number,
+  height: number,
+): { x: number; y: number }[] {
+  const cells: { x: number; y: number }[] = [];
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) <= radius) {
+        cells.push({ x, y });
+      }
+    }
+  }
+  return cells;
+}
+
 export default function BattlePage() {
   const { id } = useParams();
   const battleId = Number(id);
@@ -184,6 +202,8 @@ export default function BattlePage() {
   }));
 
   let highlightCells: { x: number; y: number }[] = [];
+  let rangeHighlightCells: { x: number; y: number }[] = [];
+  let targetHighlightCells: { x: number; y: number }[] = [];
   if (isPrebattle) {
     highlightCells = prebattleHighlightCells;
   } else if (mode === 'move' && hints) highlightCells = hints.move_cells;
@@ -195,6 +215,20 @@ export default function BattlePage() {
   if (mode === 'skill_charge' && targetId && hints) {
     const t = hints.melee_targets.find((m) => m.id === targetId);
     if (t) highlightCells = t.charge_cells;
+  }
+  if (mode === 'ranged_attack' && myActor && hints) {
+    const weaponRange = myActor.weapon_profile?.weapon_range ?? 4;
+    rangeHighlightCells = chebyshevCells(
+      myActor.position.x,
+      myActor.position.y,
+      weaponRange,
+      grid.width,
+      grid.height,
+    );
+    targetHighlightCells = hints.range_targets
+      .map((tid) => state.actors.find((a) => a.id === tid))
+      .filter(Boolean)
+      .map((a) => a!.position);
   }
 
   const onCellClick = async (x: number, y: number) => {
@@ -340,6 +374,8 @@ export default function BattlePage() {
             height={grid.height}
             actors={gridActors}
             highlightCells={highlightCells}
+            rangeHighlightCells={rangeHighlightCells}
+            targetHighlightCells={targetHighlightCells}
             activeActorId={state.active_actor_id}
             onCellClick={onCellClick}
           />
@@ -424,7 +460,7 @@ export default function BattlePage() {
               )}
               {mode === 'ranged_attack' && hints && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Select ranged target:</p>
+                  <p className="text-sm text-stone-400">Blue = range. Green = valid shot. Select target:</p>
                   <div className="flex flex-wrap gap-2">
                     {hints.range_targets.map((tid) => (
                       <button

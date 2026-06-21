@@ -12,6 +12,8 @@ export function BattleGrid({
   height,
   actors,
   highlightCells = [],
+  rangeHighlightCells = [],
+  targetHighlightCells = [],
   activeActorId,
   selectedActorId,
   onCellClick,
@@ -22,6 +24,8 @@ export function BattleGrid({
   height: number;
   actors: GridActor[];
   highlightCells?: { x: number; y: number }[];
+  rangeHighlightCells?: { x: number; y: number }[];
+  targetHighlightCells?: { x: number; y: number }[];
   activeActorId?: string | null;
   selectedActorId?: string | null;
   onCellClick?: (x: number, y: number) => void;
@@ -29,9 +33,10 @@ export function BattleGrid({
   onDragActor?: (actorId: string, x: number, y: number) => void;
 }) {
   const highlightSet = new Set(highlightCells.map((c) => `${c.x},${c.y}`));
+  const rangeSet = new Set(rangeHighlightCells.map((c) => `${c.x},${c.y}`));
+  const targetSet = new Set(targetHighlightCells.map((c) => `${c.x},${c.y}`));
   const byCell = new Map<string, GridActor>();
   for (const a of actors) {
-    if (a.alive === false) continue;
     byCell.set(`${a.position.x},${a.position.y}`, a);
   }
 
@@ -41,12 +46,21 @@ export function BattleGrid({
       const key = `${x},${y}`;
       const actor = byCell.get(key);
       const highlighted = highlightSet.has(key);
+      const inRange = rangeSet.has(key);
+      const isTarget = targetSet.has(key);
+      const isDead = actor && actor.alive === false;
       cells.push(
         <button
           key={key}
           type="button"
           className={`relative flex aspect-square items-center justify-center rounded border text-xs ${
-            highlighted ? 'border-dungeon-400 bg-dungeon-700/80 ring-1 ring-dungeon-400' : 'border-dungeon-800 bg-dungeon-900/60'
+            isTarget
+              ? 'border-green-500 bg-green-950/50 ring-2 ring-green-500/60'
+              : highlighted
+                ? 'border-dungeon-400 bg-dungeon-700/80 ring-1 ring-dungeon-400'
+                : inRange
+                  ? 'border-blue-900/80 bg-blue-950/30'
+                  : 'border-dungeon-800 bg-dungeon-900/60'
           } ${onCellClick ? 'cursor-pointer hover:border-dungeon-500' : ''}`}
           onClick={() => onCellClick?.(x, y)}
           onDragOver={(e) => draggable && e.preventDefault()}
@@ -59,16 +73,20 @@ export function BattleGrid({
         >
           {actor && (
             <span
-              draggable={draggable}
+              draggable={draggable && !isDead}
               onDragStart={(e) => {
                 e.dataTransfer.setData('actorId', actor.id);
               }}
               className={`truncate px-0.5 text-center ${
-                actor.type === 'player' ? 'text-green-300' : 'text-red-300'
-              } ${actor.id === activeActorId ? 'font-bold underline' : ''} ${
+                isDead
+                  ? 'text-stone-600 line-through opacity-50'
+                  : actor.type === 'player'
+                    ? 'text-green-300'
+                    : 'text-red-300'
+              } ${!isDead && actor.id === activeActorId ? 'animate-pulse font-bold underline ring-1 ring-amber-400/80 rounded' : ''} ${
                 actor.id === selectedActorId ? 'ring-1 ring-white' : ''
               }`}
-              title={actor.name}
+              title={isDead ? `${actor.name} (defeated)` : actor.name}
             >
               {actor.name.split(' ')[0]}
             </span>

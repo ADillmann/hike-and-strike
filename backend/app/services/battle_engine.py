@@ -94,6 +94,28 @@ def _snapshot_consumables(inventory_items) -> list[dict]:
     return items
 
 
+def enemy_weapon_profile(stats: dict) -> dict:
+    damage = int(stats.get("damage", 3))
+    strength = int(stats.get("strength", 8))
+    dexterity = int(stats.get("dexterity", 8))
+    melee_bonus = damage + strength // 3
+    if stats.get("weapon_class") == "range":
+        return {
+            "can_melee": False,
+            "can_ranged": True,
+            "melee_attack_bonus": melee_bonus,
+            "ranged_attack_bonus": damage + dexterity // 3,
+            "weapon_range": int(stats.get("range", DEFAULT_RANGE_DISTANCE)),
+        }
+    return {
+        "can_melee": True,
+        "can_ranged": False,
+        "melee_attack_bonus": melee_bonus,
+        "ranged_attack_bonus": 0,
+        "weapon_range": DEFAULT_RANGE_DISTANCE,
+    }
+
+
 def build_battle_state(
     db: Session,
     party: list[Character],
@@ -169,6 +191,7 @@ def build_battle_state(
             init_stat = stats.get("initiative", 8)
             per_turn = (1 + init_stat / 20) / total_combatants
             label = template.name if count == 1 else f"{template.name} {i + 1}"
+            wp = enemy_weapon_profile(stats)
             actors.append({
                 "id": _actor_id("enemy", template.id, i),
                 "type": "enemy",
@@ -180,7 +203,8 @@ def build_battle_state(
                 "current_hp": _enemy_hp(stats),
                 "max_hp": _enemy_hp(stats),
                 "stats": stats,
-                "attack_bonus": stats.get("damage", 2) + stats.get("strength", 8) // 3,
+                "weapon_profile": wp,
+                "attack_bonus": wp["melee_attack_bonus"],
                 "alive": True,
                 "shield_hp": 0,
                 "battle_stat_mods": {},
@@ -457,6 +481,19 @@ def pick_enemy_move_dest(state: dict, enemy: dict) -> tuple[int, int] | None:
             best_dist = dist
             best = cell
     return best
+
+
+def pick_enemy_ranged_target(state: dict, enemy: dict) -> dict | None:
+    wp = _weapon_profile(enemy)
+    if not wp.get("can_ranged"):
+        return None
+    max_range = int(wp.get("weapon_range", DEFAULT_RANGE_DISTANCE))
+    players = [a for a in state["actors"] if a["type"] == "player" and a["alive"]]
+    in_range = [p for p in players if can_range_attack(state, enemy, p, max_range)]
+    if not in_range:
+        return None
+    ex, ey = actor_pos(enemy)
+    return min(in_range, key=lambda p: chebyshev_distance((ex, ey), actor_pos(p)))
 
 
 def _move_actor(actor: dict, dest: tuple[int, int]) -> int:
@@ -790,6 +827,14 @@ def perform_action(
                 return {**state, "actors": actors}, "No valid target"
             log_msg = _execute_melee_attack(state, actor, target, None, is_enemy=True)
 
+        elif action == "enemy_ranged_attack":
+            if actor["type"] != "enemy":
+                return {**state, "actors": actors}, "Not an enemy"
+            target = pick_enemy_ranged_target({**state, "actors": actors}, actor)
+            if not target:
+                return {**state, "actors": actors}, "No valid target"
+            log_msg = _execute_ranged_attack(state, actor, target)
+
         elif action == "enemy_move":
             if actor["type"] != "enemy":
                 return {**state, "actors": actors}, "Not an enemy"
@@ -817,6 +862,10 @@ def perform_action(
             if state.get("log") and "turn." not in state["log"][-1]["message"]:
                 state["log"] = state.get("log", []) + [_log_entry(f"{next_name}'s turn.")]
     return state, "ok"
+
+
+def _enemy_has_ranged_target(state: dict[str, Any], enemy: dict) -> bool:
+    return pick_enemy_ranged_target(state, enemy) is not None
 
 
 def _enemy_has_melee_target(state: dict[str, Any], enemy: dict) -> bool:
@@ -848,7 +897,9 @@ def resolve_auto_turns(state: dict[str, Any], max_iters: int = 30) -> dict[str, 
         actor = _get_actor(state, active_id)
         if not actor or actor["type"] != "enemy":
             break
-        if _enemy_has_melee_target(state, actor):
+        if _enemy_has_ranged_target(state, actor):
+            state, msg = perform_action(state, active_id, "enemy_ranged_attack")
+        elif _enemy_has_melee_target(state, actor):
             state, msg = perform_action(state, active_id, "enemy_attack")
         else:
             state, msg = perform_action(state, active_id, "enemy_move")

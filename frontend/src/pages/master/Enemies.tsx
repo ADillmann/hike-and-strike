@@ -6,7 +6,7 @@ import { Layout } from '../../components/Layout';
 interface Enemy {
   id: number;
   name: string;
-  stats: Record<string, number>;
+  stats: Record<string, number | string>;
   description: string;
   is_system: boolean;
 }
@@ -41,6 +41,8 @@ type EnemyForm = {
   name: string;
   description: string;
   stats: Record<StatKey, number>;
+  weapon_class: 'melee' | 'range';
+  weapon_range: number;
 };
 
 type PresetForm = {
@@ -55,6 +57,8 @@ const defaultEnemyForm = (): EnemyForm => ({
   name: '',
   description: '',
   stats: defaultEnemyStats(),
+  weapon_class: 'melee',
+  weapon_range: 4,
 });
 
 const defaultPresetEntry = (enemyNames: string[]): PresetEntry => ({
@@ -73,7 +77,23 @@ function enemyFormFromEnemy(enemy: Enemy): EnemyForm {
   for (const { key } of STAT_FIELDS) {
     stats[key] = enemy.stats[key] ?? stats[key];
   }
-  return { name: enemy.name, description: enemy.description, stats };
+  const wc = enemy.stats.weapon_class === 'range' ? 'range' : 'melee';
+  return {
+    name: enemy.name,
+    description: enemy.description,
+    stats,
+    weapon_class: wc,
+    weapon_range: typeof enemy.stats.range === 'number' ? enemy.stats.range : 4,
+  };
+}
+
+function buildEnemyStats(form: EnemyForm): Record<string, number | string> {
+  const stats: Record<string, number | string> = { ...form.stats };
+  if (form.weapon_class === 'range') {
+    stats.weapon_class = 'range';
+    stats.range = form.weapon_range;
+  }
+  return stats;
 }
 
 function presetFormFromPreset(preset: Preset): PresetForm {
@@ -85,15 +105,18 @@ function presetFormFromPreset(preset: Preset): PresetForm {
   };
 }
 
-function formatEnemyStats(stats: Record<string, number>): string {
-  return STAT_FIELDS
+function formatEnemyStats(stats: Record<string, number | string>): string {
+  const lines = STAT_FIELDS
     .map(({ key, label }) => {
       const val = stats[key];
       if (val === undefined) return null;
       return `${label} ${val}`;
     })
-    .filter(Boolean)
-    .join(' · ');
+    .filter(Boolean);
+  if (stats.weapon_class === 'range') {
+    lines.push(`Ranged (range ${stats.range ?? 4})`);
+  }
+  return lines.join(' · ');
 }
 
 function EnemyFormFields({
@@ -133,6 +156,30 @@ function EnemyFormFields({
           ))}
         </div>
       </fieldset>
+      <div>
+        <label className="label">Combat style</label>
+        <select
+          className="input"
+          value={form.weapon_class}
+          onChange={(e) => onChange({ ...form, weapon_class: e.target.value as 'melee' | 'range' })}
+        >
+          <option value="melee">Melee</option>
+          <option value="range">Ranged</option>
+        </select>
+      </div>
+      {form.weapon_class === 'range' && (
+        <div>
+          <label className="label">Attack range (cells)</label>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={9}
+            value={form.weapon_range}
+            onChange={(e) => onChange({ ...form, weapon_range: +e.target.value })}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -252,7 +299,7 @@ export default function EnemiesPage() {
     await api.post('/enemies', {
       name: enemyForm.name,
       description: enemyForm.description,
-      stats: enemyForm.stats,
+      stats: buildEnemyStats(enemyForm),
     });
     setEnemyForm(defaultEnemyForm());
     load();
@@ -273,7 +320,7 @@ export default function EnemiesPage() {
     await api.patch(`/enemies/${editingEnemy.id}`, {
       name: editingEnemy.form.name,
       description: editingEnemy.form.description,
-      stats: editingEnemy.form.stats,
+      stats: buildEnemyStats(editingEnemy.form),
     });
     setEditingEnemy(null);
     load();

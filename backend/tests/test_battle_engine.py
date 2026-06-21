@@ -2,6 +2,7 @@
 
 from app.services.battle_engine import (
     apply_prebattle_move,
+    enemy_weapon_profile,
     perform_action,
     pick_enemy_move_dest,
     resolve_auto_turns,
@@ -357,3 +358,43 @@ def test_melee_skill_with_charge():
     assert hero["skills"][0]["uses_remaining"] == 0
     enemy = next(a for a in new_state["actors"] if a["id"] == "enemy_1_0")
     assert enemy["current_hp"] < 10
+
+
+def test_enemy_weapon_profile_ranged():
+    wp = enemy_weapon_profile({"damage": 3, "strength": 8, "dexterity": 12, "weapon_class": "range", "range": 5})
+    assert wp["can_ranged"] is True
+    assert wp["can_melee"] is False
+    assert wp["weapon_range"] == 5
+
+
+def test_enemy_ranged_attack_at_distance():
+    hero = _minimal_state()["actors"][0]
+    hero["position"] = {"x": 4, "y": 2}
+    stats = {"damage": 3, "strength": 7, "dexterity": 12, "weapon_class": "range", "range": 4}
+    archer = {
+        "id": "enemy_archer",
+        "type": "enemy",
+        "name": "Archer",
+        "alive": True,
+        "initiative_value": 10.0,
+        "per_turn_value": 0.3,
+        "current_hp": 10,
+        "max_hp": 10,
+        "position": {"x": 0, "y": 2},
+        "guarding": False,
+        "stats": stats,
+        "weapon_profile": enemy_weapon_profile(stats),
+        "attack_bonus": 3,
+        "battle_modifiers": {},
+    }
+    state = _minimal_state(
+        phase=None,
+        status="active",
+        active_actor_id="enemy_archer",
+        actors=[hero, archer],
+    )
+    new_state = resolve_auto_turns(state)
+    assert new_state["active_actor_id"] != "enemy_archer"
+    assert any("shoots" in e["message"] for e in new_state["log"])
+    player = next(a for a in new_state["actors"] if a["id"] == "player_1_0")
+    assert player["current_hp"] < hero["max_hp"]

@@ -32,6 +32,7 @@ BASE_ENEMIES = [
     ("Bandit", {"strength": 10, "dexterity": 11, "intelligence": 8, "durability": 9, "charisma": 7, "initiative": 11, "damage": 4}, "A highway robber."),
     ("Wolf", {"strength": 9, "dexterity": 14, "intelligence": 4, "durability": 8, "charisma": 4, "initiative": 14, "damage": 3}, "A hungry predator."),
     ("Skeleton", {"strength": 9, "dexterity": 8, "intelligence": 4, "durability": 10, "charisma": 4, "initiative": 8, "damage": 3, "armor_bonus": 1}, "Undead warrior."),
+    ("Goblin Archer", {"strength": 7, "dexterity": 12, "intelligence": 6, "durability": 7, "charisma": 6, "initiative": 13, "damage": 3, "weapon_class": "range", "range": 4}, "A goblin with a short bow."),
 ]
 
 BASE_SKILLS = [
