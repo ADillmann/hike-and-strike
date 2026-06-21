@@ -42,7 +42,7 @@ def use_skill_outside_battle(
     target = db.get(Character, target_character_id)
     if not target:
         raise ValueError("Target not found")
-    if caster.id != target.id and not share_group(caster.id, target.id):
+    if caster.id != target.id and not share_group(db, caster.id, target.id):
         raise ValueError("You can only target members of your group")
 
     effect = normalize_effect_type(meta["effect_type"])
