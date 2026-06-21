@@ -1,6 +1,9 @@
 """Unit tests for battle engine turn flow and actions."""
 
 from app.services.battle_engine import (
+    _actor_id,
+    _enemy_display_name,
+    _enemy_template_totals,
     apply_prebattle_move,
     enemy_weapon_profile,
     perform_action,
@@ -9,7 +12,7 @@ from app.services.battle_engine import (
     start_battle,
     update_battle_positions,
 )
-from app.services.battle_geometry import actor_pos
+from app.services.battle_geometry import actor_pos, apply_positions
 
 
 def _minimal_state(
@@ -416,3 +419,53 @@ def test_enemy_ranged_attack_at_distance():
     assert any("shoots" in e["message"] for e in new_state["log"])
     player = next(a for a in new_state["actors"] if a["id"] == "player_1_0")
     assert player["current_hp"] < hero["max_hp"]
+
+
+def test_enemy_spawn_unique_ids_for_repeated_template_specs():
+    """Three custom entries of Bandit x1 must not share enemy_{id}_0."""
+    specs = [
+        {"template_id": 5, "count": 1, "power_scale": 1.0},
+        {"template_id": 5, "count": 1, "power_scale": 1.0},
+        {"template_id": 5, "count": 1, "power_scale": 1.0},
+    ]
+    totals = _enemy_template_totals(specs)
+    assert totals[5] == 3
+
+    actors: list[dict] = []
+    spawn_index_by_template: dict[int, int] = {}
+    for spec in specs:
+        count = spec.get("count", 1)
+        tid = int(spec["template_id"])
+        total_for_template = totals.get(tid, count)
+        for _ in range(count):
+            spawn_index = spawn_index_by_template.get(tid, 0)
+            spawn_index_by_template[tid] = spawn_index + 1
+            actors.append({
+                "id": _actor_id("enemy", tid, spawn_index),
+                "type": "enemy",
+                "name": _enemy_display_name("Bandit", spawn_index, total_for_template),
+                "position": {"x": 0, "y": 0},
+            })
+
+    ids = [a["id"] for a in actors]
+    assert len(set(ids)) == 3
+    assert ids == ["enemy_5_0", "enemy_5_1", "enemy_5_2"]
+    assert [a["name"] for a in actors] == ["Bandit A", "Bandit B", "Bandit C"]
+
+    state = _minimal_state(
+        phase="setup",
+        actors=[
+            _minimal_state()["actors"][0],
+            *actors,
+        ],
+    )
+    positions = {
+        "player_1_0": {"x": 0, "y": 0},
+        "enemy_5_0": {"x": 3, "y": 0},
+        "enemy_5_1": {"x": 3, "y": 1},
+        "enemy_5_2": {"x": 3, "y": 2},
+    }
+    updated = apply_positions(state, positions)
+    enemies = [a for a in updated["actors"] if a["type"] == "enemy"]
+    assert len(enemies) == 3
+    assert {actor_pos(e) for e in enemies} == {(3, 0), (3, 1), (3, 2)}

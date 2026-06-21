@@ -48,6 +48,35 @@ def _actor_id(actor_type: str, entity_id: int, index: int = 0) -> str:
     return f"{actor_type}_{entity_id}_{index}"
 
 
+def _enemy_letter_suffix(index: int) -> str:
+    if index < 26:
+        return chr(ord("A") + index)
+    return str(index + 1)
+
+
+def _enemy_template_totals(enemy_specs: list[dict]) -> dict[int, int]:
+    totals: dict[int, int] = {}
+    for spec in enemy_specs:
+        tid = int(spec["template_id"])
+        totals[tid] = totals.get(tid, 0) + int(spec.get("count", 1))
+    return totals
+
+
+def _enemy_display_name(template_name: str, spawn_index: int, total_for_template: int) -> str:
+    if total_for_template <= 1:
+        return template_name
+    return f"{template_name} {_enemy_letter_suffix(spawn_index)}"
+
+
+def _assert_unique_actor_ids(actors: list[dict]) -> None:
+    seen: set[str] = set()
+    for actor in actors:
+        aid = actor["id"]
+        if aid in seen:
+            raise ValueError(f"Duplicate battle actor id: {aid}")
+        seen.add(aid)
+
+
 def _enemy_hp(stats: dict) -> int:
     armor = stats.get("armor_bonus", 0)
     return compute_max_hp(stats.get("durability", 8), armor)
@@ -183,22 +212,28 @@ def build_battle_state(
         }
         actors.append(actor)
 
+    template_totals = _enemy_template_totals(enemy_specs)
+    spawn_index_by_template: dict[int, int] = {}
     for spec in enemy_specs:
         template = db.get(EnemyTemplate, spec["template_id"])
         if not template:
             continue
         count = spec.get("count", 1)
         scale = spec.get("power_scale", 1.0)
-        for i in range(count):
+        tid = template.id
+        total_for_template = template_totals.get(tid, count)
+        for _ in range(count):
+            spawn_index = spawn_index_by_template.get(tid, 0)
+            spawn_index_by_template[tid] = spawn_index + 1
             stats = _scale_stats(template.stats or {}, scale)
             init_stat = stats.get("initiative", 8)
             per_turn = (1 + init_stat / 20) / total_combatants
-            label = template.name if count == 1 else f"{template.name} {i + 1}"
+            label = _enemy_display_name(template.name, spawn_index, total_for_template)
             wp = enemy_weapon_profile(stats)
             actors.append({
-                "id": _actor_id("enemy", template.id, i),
+                "id": _actor_id("enemy", tid, spawn_index),
                 "type": "enemy",
-                "template_id": template.id,
+                "template_id": tid,
                 "name": label,
                 "initiative_stat": init_stat,
                 "per_turn_value": per_turn,
@@ -215,6 +250,7 @@ def build_battle_state(
                 "position": {"x": 0, "y": 0},
             })
 
+    _assert_unique_actor_ids(actors)
     default_placement(actors, gs, gs, preset=preset)
     eligible_prebattle = [a["id"] for a in actors if a["type"] == "player" and a.get("prebattle_eligible") and a["alive"]]
 

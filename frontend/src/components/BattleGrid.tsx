@@ -7,6 +7,28 @@ export interface GridActor {
   character_id?: number;
 }
 
+/** Short label for grid cells (e.g. "Bandit A" → "Ban·A", "Goblin B" → "Gob·B"). */
+export function gridTokenLabel(name: string): string {
+  const letterMatch = name.match(/^(.+?)\s+([A-Z])$/);
+  if (letterMatch) {
+    const abbrev = _abbrevTokenBase(letterMatch[1].trim());
+    return `${abbrev}·${letterMatch[2]}`;
+  }
+  const numMatch = name.match(/^(.+?)\s+(\d+)$/);
+  if (numMatch) {
+    const abbrev = _abbrevTokenBase(numMatch[1].trim());
+    return `${abbrev}${numMatch[2]}`;
+  }
+  const first = name.split(' ')[0];
+  return first.length <= 6 ? first : `${first.slice(0, 5)}…`;
+}
+
+function _abbrevTokenBase(baseName: string): string {
+  const first = baseName.split(' ')[0];
+  if (first.length <= 4) return first;
+  return first.slice(0, 3);
+}
+
 export function BattleGrid({
   width,
   height,
@@ -97,7 +119,7 @@ export function BattleGrid({
               }`}
               title={isDead ? `${actor.name} (defeated)` : actor.name}
             >
-              {actor.name.split(' ')[0]}
+              {gridTokenLabel(actor.name)}
             </span>
           )}
         </button>,
