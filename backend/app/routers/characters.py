@@ -54,6 +54,7 @@ from app.services.campaign_engine import broadcast_character_updated, recalculat
 from app.services.currency import format_price, format_wallet, get_system_currency_settings
 from app.services.secret_engine import examine_secret_item, secret_inventory_payload, solve_secret_item
 from app.services.character_stats import (
+    active_item_effect_templates,
     effective_stats,
     equip_slots_for_item,
     get_item_in_slot,
@@ -62,6 +63,7 @@ from app.services.character_stats import (
     is_equippable,
     is_two_handed_weapon,
     normalize_equipped_slot,
+    serialize_item_effects,
     slot_label,
     stacks_in_inventory,
     validate_point_buy,
@@ -132,7 +134,12 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         .filter(Character.id == character.id)
         .first()
     )
-    eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
+    eff = effective_stats(
+        character.stats,
+        character.inventory_items,
+        character.temporary_effects,
+        active_item_effect_templates(db, character.inventory_items),
+    )
     prog = progression_fields(character)
     settings = get_system_currency_settings(db)
     wallet_copper = character.wallet_copper or 0
@@ -174,6 +181,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
             }
             for e in character.temporary_effects
         ],
+        item_effects=serialize_item_effects(db, character.inventory_items),
         in_active_battle=character_in_active_battle(db, character.id),
     )
 

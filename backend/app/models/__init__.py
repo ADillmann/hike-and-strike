@@ -146,6 +146,7 @@ class ItemTemplate(Base):
     stats: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str] = mapped_column(Text, default="")
     secret_template_id: Mapped[int | None] = mapped_column(ForeignKey("secret_templates.id"), nullable=True)
+    effect_template_id: Mapped[int | None] = mapped_column(ForeignKey("effect_templates.id"), nullable=True)
     base_price: Mapped[int] = mapped_column(Integer, default=0)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

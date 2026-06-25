@@ -111,7 +111,7 @@ export function PartyCharacterEditModal({
 
         <section className="mb-4">
           <h4 className="label mb-2">Active effects</h4>
-          {character.temporary_effects.length === 0 ? (
+          {character.temporary_effects.length === 0 && (character.item_effects?.length ?? 0) === 0 ? (
             <p className="text-sm text-stone-500">No active effects</p>
           ) : (
             <ul className="space-y-2">
@@ -149,6 +149,21 @@ export function PartyCharacterEditModal({
                         Remove
                       </button>
                     </div>
+                  </li>
+                );
+              })}
+              {(character.item_effects ?? []).map((effect) => {
+                const statLine = formatStatMods(effect.stat_modifiers);
+                const battleLine = formatBattleMods(effect.active_in_battle, effect.battle_modifiers);
+                return (
+                  <li
+                    key={`item-${effect.source_item}-${effect.label}`}
+                    className="rounded border border-dungeon-600 bg-dungeon-900/50 p-2 text-sm"
+                  >
+                    <span className="font-medium text-dungeon-200">{effect.label}</span>
+                    <span className="ml-2 text-xs text-stone-500">from {effect.source_item}</span>
+                    {statLine && <p className="text-xs text-stone-400">{statLine}</p>}
+                    {battleLine && <p className="text-xs text-dungeon-300">{battleLine}</p>}
                   </li>
                 );
               })}

@@ -11,11 +11,17 @@ interface Item {
   description: string;
   stats: Record<string, unknown>;
   secret_template_id?: number | null;
+  effect_template_id?: number | null;
   base_price: number;
   is_system: boolean;
 }
 
 interface SecretOption {
+  id: number;
+  name: string;
+}
+
+interface EffectOption {
   id: number;
   name: string;
 }
@@ -85,6 +91,7 @@ type ItemForm = {
   weapon_range: number;
   passive: boolean;
   secret_template_id: number;
+  effect_template_id: number;
   base_price: number;
 };
 
@@ -107,6 +114,7 @@ const defaultForm = (): ItemForm => ({
   weapon_range: 4,
   passive: false,
   secret_template_id: 0,
+  effect_template_id: 0,
   base_price: 0,
 });
 
@@ -136,6 +144,7 @@ function formFromItem(item: Item): ItemForm {
     weapon_range: numStat(s, 'range') || 4,
     passive: Boolean(s.passive),
     secret_template_id: item.secret_template_id ?? 0,
+    effect_template_id: item.effect_template_id ?? 0,
     base_price: item.base_price ?? 0,
   };
 }
@@ -223,10 +232,12 @@ function ItemFormFields({
   form,
   onChange,
   secrets,
+  effects,
 }: {
   form: ItemForm;
   onChange: (next: ItemForm) => void;
   secrets: SecretOption[];
+  effects: EffectOption[];
 }) {
   const set = <K extends keyof ItemForm>(key: K, value: ItemForm[K]) => {
     onChange({ ...form, [key]: value });
@@ -396,6 +407,18 @@ function ItemFormFields({
             <input type="checkbox" checked={form.passive} onChange={(e) => set('passive', e.target.checked)} />
             Passive (applies stats from bag without equipping)
           </label>
+          <div>
+            <label className="label">Granted effect (optional)</label>
+            <select
+              className="input"
+              value={form.effect_template_id}
+              onChange={(e) => set('effect_template_id', +e.target.value)}
+            >
+              <option value={0}>None</option>
+              {effects.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-stone-500">Active while equipped, or in bag if passive.</p>
+          </div>
         </>
       )}
     </div>
@@ -405,6 +428,7 @@ function ItemFormFields({
 export default function ItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [secrets, setSecrets] = useState<SecretOption[]>([]);
+  const [effects, setEffects] = useState<EffectOption[]>([]);
   const [form, setForm] = useState<ItemForm>(defaultForm);
   const [editing, setEditing] = useState<{ id: number; is_system: boolean; form: ItemForm } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -415,6 +439,7 @@ export default function ItemsPage() {
   const load = () => {
     api.get<Item[]>('/items').then(setItems);
     api.get<SecretOption[]>('/secrets').then(setSecrets);
+    api.get<EffectOption[]>('/effects').then(setEffects);
   };
 
   useEffect(() => { load(); }, []);
@@ -426,6 +451,7 @@ export default function ItemsPage() {
     description: f.description,
     stats: buildStats(f),
     secret_template_id: f.item_type === 'secret' ? f.secret_template_id || null : null,
+    effect_template_id: f.effect_template_id || null,
     base_price: f.base_price,
   });
 
@@ -455,7 +481,7 @@ export default function ItemsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <form onSubmit={create} className="card space-y-3">
           <h2 className="font-semibold text-dungeon-300">Custom Item</h2>
-          <ItemFormFields form={form} onChange={setForm} secrets={secrets} />
+          <ItemFormFields form={form} onChange={setForm} secrets={secrets} effects={effects} />
           <button className="btn-primary" type="submit">Add Item</button>
         </form>
 
@@ -485,6 +511,9 @@ export default function ItemsPage() {
             ) : null}
             {filteredItems.map((item) => {
               const statLines = formatItemStats(item.item_type, item.stats);
+              const effectName = item.effect_template_id
+                ? effects.find((e) => e.id === item.effect_template_id)?.name
+                : null;
               return (
                 <div key={item.id} className="rounded border border-dungeon-600 p-2 text-sm">
                   <div className="flex justify-between gap-2">
@@ -502,6 +531,9 @@ export default function ItemsPage() {
                   {item.description && <p className="text-stone-400">{item.description}</p>}
                   {statLines.length > 0 && (
                     <p className="text-xs text-stone-500">{statLines.join(' · ')}</p>
+                  )}
+                  {effectName && (
+                    <p className="text-xs text-dungeon-300">Effect: {effectName}</p>
                   )}
                   <div className="mt-1 flex gap-1">
                     <button
@@ -530,7 +562,7 @@ export default function ItemsPage() {
               Edit Item
               {editing.is_system && <span className="ml-2 text-sm font-normal text-dungeon-400">(base item)</span>}
             </h3>
-            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} secrets={secrets} />
+            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} secrets={secrets} effects={effects} />
             <div className="flex gap-2">
               <button className="btn-primary" onClick={saveEdit}>Save</button>
               <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>

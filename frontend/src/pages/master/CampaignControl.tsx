@@ -7,6 +7,7 @@ import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, MAX_BATTL
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
+import { ITEM_TYPE_FILTER_OPTIONS, ItemTypeFilter } from '../../utils/itemTypes';
 
 interface CampaignState {
   campaign_id: number;
@@ -860,6 +861,7 @@ function AdvanceRewardBuilder({
   const [randomCharId, setRandomCharId] = useState(party[0]?.id || 0);
   const [tier, setTier] = useState(1);
   const [randomCount, setRandomCount] = useState(1);
+  const [randomItemType, setRandomItemType] = useState<ItemTypeFilter>('all');
   const [hpWholeParty, setHpWholeParty] = useState(false);
   const [hpChange, setHpChange] = useState(-5);
   const [xpWholeParty, setXpWholeParty] = useState(true);
@@ -900,9 +902,9 @@ function AdvanceRewardBuilder({
     if (rewardType === 'random') {
       const targets = randomWholeParty ? party.map((p) => p.id) : [randomCharId].filter(Boolean);
       if (targets.length) {
-        onChange({
-          rewards: { random_tier: [{ tier, count: randomCount, character_ids: targets }] },
-        });
+        const entry: Record<string, unknown> = { tier, count: randomCount, character_ids: targets };
+        if (randomItemType !== 'all') entry.item_type = randomItemType;
+        onChange({ rewards: { random_tier: [entry] } });
       } else {
         onChange({});
       }
@@ -980,6 +982,7 @@ function AdvanceRewardBuilder({
     randomCount,
     randomWholeParty,
     randomCharId,
+    randomItemType,
     hpWholeParty,
     hpChange,
     xpWholeParty,
@@ -1046,9 +1049,17 @@ function AdvanceRewardBuilder({
               <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
             </div>
             <div>
-              <label className="label">Count each</label>
+              <label className="label">Count</label>
               <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
             </div>
+          </div>
+          <div>
+            <label className="label">Item type</label>
+            <select className="input" value={randomItemType} onChange={(e) => setRandomItemType(e.target.value as ItemTypeFilter)}>
+              {ITEM_TYPE_FILTER_OPTIONS.map(({ id, label }) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
           </div>
         </>
       )}

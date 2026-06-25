@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import Character, Skill, SkillTemplate, TemporaryEffect
 from app.services.campaign_engine import get_active_campaign_for_character
-from app.services.character_stats import effective_stats
+from app.services.character_stats import active_item_effect_templates, effective_stats
 from app.services.skill_effects import normalize_effect_type, skill_battle_meta
 
 
@@ -53,7 +53,12 @@ def use_skill_outside_battle(
         db.refresh(caster, ["inventory_items", "temporary_effects"])
         for inv in caster.inventory_items:
             db.refresh(inv, ["item_template"])
-        eff = effective_stats(caster.stats, caster.inventory_items, caster.temporary_effects)
+        eff = effective_stats(
+            caster.stats,
+            caster.inventory_items,
+            caster.temporary_effects,
+            active_item_effect_templates(db, caster.inventory_items),
+        )
         heal_amount = heal_base + eff.get("intelligence", 8) // 2
         target.current_hp = min(target.max_hp, target.current_hp + heal_amount)
         skill.uses_remaining -= 1

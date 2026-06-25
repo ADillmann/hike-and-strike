@@ -142,6 +142,7 @@ class CharacterOut(BaseModel):
     skills: list[dict[str, Any]] = []
     inventory: list[dict[str, Any]] = []
     temporary_effects: list[dict[str, Any]] = []
+    item_effects: list[dict[str, Any]] = []
     in_active_battle: bool = False
 
     class Config:
@@ -324,6 +325,7 @@ class ItemTemplateCreate(BaseModel):
     stats: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
     secret_template_id: int | None = None
+    effect_template_id: int | None = None
     base_price: int = 0
 
 
@@ -335,6 +337,7 @@ class ItemTemplateOut(BaseModel):
     stats: dict[str, Any]
     description: str
     secret_template_id: int | None = None
+    effect_template_id: int | None = None
     base_price: int = 0
     is_system: bool
 

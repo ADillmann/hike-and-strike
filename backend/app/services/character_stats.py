@@ -165,7 +165,7 @@ def weapon_attack_bonus(inventory_items, stats: dict) -> int:
     return equipped_weapon_profile(inventory_items, stats)["melee_attack_bonus"]
 
 
-def effective_stats(base_stats: dict, inventory_items, temporary_effects) -> dict[str, int]:
+def effective_stats(base_stats: dict, inventory_items, temporary_effects, item_effects=None) -> dict[str, int]:
     result = {s: base_stats.get(s, STAT_DEFAULT) for s in STAT_NAMES}
     for inv in inventory_items:
         if not inv.item_template or not inv.item_template.stats:
@@ -180,16 +180,27 @@ def effective_stats(base_stats: dict, inventory_items, temporary_effects) -> dic
         for key, val in (effect.stat_modifiers or {}).items():
             if key in result and isinstance(val, int):
                 result[key] += val
+    for template in item_effects or []:
+        for key, val in (template.stat_modifiers or {}).items():
+            if key in result and isinstance(val, int):
+                result[key] += val
     return result
 
 
-def aggregate_battle_modifiers(temporary_effects) -> dict[str, int]:
+def aggregate_battle_modifiers(temporary_effects, item_effects=None) -> dict[str, int]:
     totals: dict[str, int] = {key: 0 for key in BATTLE_MODIFIER_KEYS}
     for effect in temporary_effects:
         if not effect.active_in_battle:
             continue
         for key in BATTLE_MODIFIER_KEYS:
             val = (effect.battle_modifiers or {}).get(key)
+            if isinstance(val, (int, float)):
+                totals[key] += int(val)
+    for template in item_effects or []:
+        if not template.active_in_battle:
+            continue
+        for key in BATTLE_MODIFIER_KEYS:
+            val = (template.battle_modifiers or {}).get(key)
             if isinstance(val, (int, float)):
                 totals[key] += int(val)
     return {k: v for k, v in totals.items() if v != 0}
@@ -216,12 +227,64 @@ def effect_allsight_level(effect) -> int:
     return _label_allsight_level(getattr(effect, "label", "") or "")
 
 
-def party_allsight_level_from_characters(characters) -> int:
+def party_allsight_level_from_characters(characters, db=None) -> int:
     level = 0
     for character in characters:
         for effect in getattr(character, "temporary_effects", []) or []:
             level = max(level, effect_allsight_level(effect))
+        if db is not None:
+            for template in active_item_effect_templates(db, getattr(character, "inventory_items", []) or []):
+                level = max(level, effect_allsight_level(template))
     return level
+
+
+def inventory_item_grants_effect(inv) -> bool:
+    template = getattr(inv, "item_template", None)
+    if not template or not getattr(template, "effect_template_id", None):
+        return False
+    if inv.equipped_slot:
+        return True
+    stats = template.stats or {}
+    return bool(stats.get("passive"))
+
+
+def active_item_effect_templates(db, inventory_items) -> list:
+    from app.models import EffectTemplate
+
+    seen: set[int] = set()
+    result = []
+    for inv in inventory_items:
+        if not inventory_item_grants_effect(inv):
+            continue
+        tid = inv.item_template.effect_template_id
+        if not tid or tid in seen:
+            continue
+        effect = db.get(EffectTemplate, tid)
+        if effect:
+            seen.add(tid)
+            result.append(effect)
+    return result
+
+
+def serialize_item_effects(db, inventory_items) -> list[dict]:
+    from app.models import EffectTemplate
+
+    entries = []
+    for inv in inventory_items:
+        if not inventory_item_grants_effect(inv):
+            continue
+        template = inv.item_template
+        effect = db.get(EffectTemplate, template.effect_template_id)
+        if not effect:
+            continue
+        entries.append({
+            "source_item": template.name,
+            "label": effect.label or effect.name,
+            "stat_modifiers": effect.stat_modifiers or {},
+            "battle_modifiers": effect.battle_modifiers or {},
+            "active_in_battle": effect.active_in_battle,
+        })
+    return entries
 
 
 def is_bag_only_item(item_template) -> bool:

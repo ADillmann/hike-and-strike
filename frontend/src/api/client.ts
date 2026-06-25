@@ -119,4 +119,11 @@ export interface Character {
     cleared_on_rest?: boolean;
     cleared_on_event?: boolean;
   }[];
+  item_effects?: {
+    source_item: string;
+    label: string;
+    stat_modifiers: Record<string, number>;
+    battle_modifiers?: Record<string, number>;
+    active_in_battle?: boolean;
+  }[];
 }

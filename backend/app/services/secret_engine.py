@@ -7,7 +7,7 @@ from app.game.constants import STAT_NAMES
 from app.models import Character, EffectTemplate, InventoryItem, ItemTemplate, SecretTemplate
 from app.services.campaign_engine import apply_effect_template, grant_item, grant_wallet
 from app.services.character_progression import campaign_has_active_battle, grant_xp
-from app.services.character_stats import effective_stats
+from app.services.character_stats import active_item_effect_templates, effective_stats
 from app.services.secret_solvers import get_solver, validate_solver_type
 
 
@@ -30,8 +30,13 @@ def _xp_blocked_in_battle(db: Session, character_id: int) -> bool:
     return False
 
 
-def run_examine_check(character: Character, secret: SecretTemplate) -> tuple[bool, int, int]:
-    eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
+def run_examine_check(db: Session, character: Character, secret: SecretTemplate) -> tuple[bool, int, int]:
+    eff = effective_stats(
+        character.stats,
+        character.inventory_items,
+        character.temporary_effects,
+        active_item_effect_templates(db, character.inventory_items),
+    )
     stat_name = secret.examine_stat if secret.examine_stat in STAT_NAMES else "intelligence"
     stat_val = eff.get(stat_name, 8)
     dc = secret.examine_dc
@@ -117,7 +122,7 @@ def examine_secret_item(db: Session, character: Character, inventory_item_id: in
             "can_solve": True,
         }
 
-    success, _roll, _dc = run_examine_check(character, secret)
+    success, _roll, _dc = run_examine_check(db, character, secret)
     state["examined"] = True
     inv.secret_state = state
 

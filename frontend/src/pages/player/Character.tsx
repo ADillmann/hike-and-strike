@@ -218,7 +218,7 @@ export function CharacterSheetPage() {
             </div>
           </div>
         )}
-        {character.temporary_effects.length > 0 && (
+        {(character.temporary_effects.length > 0 || (character.item_effects?.length ?? 0) > 0) && (
           <div className="mt-4">
             <h3 className="text-sm text-stone-400">Active effects</h3>
             <div className="mt-1 space-y-1">
@@ -228,6 +228,18 @@ export function CharacterSheetPage() {
                 return (
                   <div key={e.id} className="rounded bg-red-900/50 px-2 py-1 text-xs">
                     <span className="font-medium">{e.label}</span>
+                    {statLine && <span className="ml-2 text-stone-400">{statLine}</span>}
+                    {battleLine && <span className="ml-2 text-dungeon-300">{battleLine}</span>}
+                  </div>
+                );
+              })}
+              {(character.item_effects ?? []).map((e) => {
+                const statLine = formatStatMods(e.stat_modifiers);
+                const battleLine = formatBattleMods(e.active_in_battle, e.battle_modifiers);
+                return (
+                  <div key={`item-${e.source_item}-${e.label}`} className="rounded bg-dungeon-800 px-2 py-1 text-xs">
+                    <span className="font-medium">{e.label}</span>
+                    <span className="ml-2 text-stone-500">from {e.source_item}</span>
                     {statLine && <span className="ml-2 text-stone-400">{statLine}</span>}
                     {battleLine && <span className="ml-2 text-dungeon-300">{battleLine}</span>}
                   </div>

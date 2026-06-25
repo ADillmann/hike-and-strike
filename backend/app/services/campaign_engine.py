@@ -168,6 +168,23 @@ def apply_effect_template(db: Session, character_id: int, template_id: int) -> N
     )
 
 
+def random_item_pool(db: Session, tier: int, item_type_filter: str | None = None) -> list[ItemTemplate]:
+    items = db.query(ItemTemplate).filter(ItemTemplate.tier == tier).all()
+    if not item_type_filter or item_type_filter == "all":
+        return items
+    if item_type_filter == "weapon_melee":
+        return [
+            i for i in items
+            if i.item_type == "weapon" and (i.stats or {}).get("weapon_class") != "range"
+        ]
+    if item_type_filter == "weapon_range":
+        return [
+            i for i in items
+            if i.item_type == "weapon" and (i.stats or {}).get("weapon_class") == "range"
+        ]
+    return [i for i in items if i.item_type == item_type_filter]
+
+
 def apply_rewards_and_punishments(
     db: Session,
     campaign: Campaign,
@@ -219,7 +236,7 @@ def apply_rewards_and_punishments(
             tier = entry.get("tier", 1)
             count = entry.get("count", 1)
             targets = _targets(entry, default_party=True)
-            pool = db.query(ItemTemplate).filter(ItemTemplate.tier == tier).all()
+            pool = random_item_pool(db, tier, entry.get("item_type"))
             if pool:
                 for char_id in targets:
                     for _ in range(count):

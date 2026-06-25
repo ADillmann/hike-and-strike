@@ -38,6 +38,7 @@ from app.services.battle_geometry import (
 )
 from app.services.character_stats import (
     aggregate_battle_modifiers,
+    active_item_effect_templates,
     compute_max_hp,
     effective_stats,
     equipped_weapon_profile,
@@ -238,7 +239,12 @@ def build_battle_state(
             db.refresh(inv, ["item_template"])
         for skill in character.skills:
             db.refresh(skill, ["skill_template"])
-        eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
+        eff = effective_stats(
+            character.stats,
+            character.inventory_items,
+            character.temporary_effects,
+            active_item_effect_templates(db, character.inventory_items),
+        )
         init_stat = eff.get("initiative", 8)
         per_turn = (1 + init_stat / 20) / total_combatants
         wp = equipped_weapon_profile(character.inventory_items, eff)
@@ -258,7 +264,10 @@ def build_battle_state(
             "alive": character.current_hp > 0,
             "shield_hp": 0,
             "battle_stat_mods": {},
-            "battle_modifiers": aggregate_battle_modifiers(character.temporary_effects),
+            "battle_modifiers": aggregate_battle_modifiers(
+                character.temporary_effects,
+                active_item_effect_templates(db, character.inventory_items),
+            ),
             "guarding": False,
             "guard_reduction": 0.0,
             "has_shield": _has_shield_equipped(character.inventory_items),
@@ -328,7 +337,7 @@ def build_battle_state(
     eligible_prebattle = [a["id"] for a in actors if a["type"] == "player" and a.get("prebattle_eligible") and a["alive"]]
 
     return {
-        "party_allsight_level": party_allsight_level_from_characters(party),
+        "party_allsight_level": party_allsight_level_from_characters(party, db),
         "status": "pending",
         "phase": "setup" if not eligible_prebattle else "prebattle",
         "grid": {
@@ -368,17 +377,25 @@ def sync_weapon_profiles(db: Session, state: dict[str, Any]) -> dict[str, Any]:
         db.refresh(character, ["inventory_items", "temporary_effects"])
         for inv in character.inventory_items:
             db.refresh(inv, ["item_template"])
-        eff = effective_stats(character.stats, character.inventory_items, character.temporary_effects)
+        eff = effective_stats(
+            character.stats,
+            character.inventory_items,
+            character.temporary_effects,
+            active_item_effect_templates(db, character.inventory_items),
+        )
         wp = equipped_weapon_profile(character.inventory_items, eff)
         actor["weapon_profile"] = wp
         actor["attack_bonus"] = wp["melee_attack_bonus"]
         actor["stats"] = eff
         actor["has_shield"] = _has_shield_equipped(character.inventory_items)
-        actor["battle_modifiers"] = aggregate_battle_modifiers(character.temporary_effects)
+        actor["battle_modifiers"] = aggregate_battle_modifiers(
+            character.temporary_effects,
+            active_item_effect_templates(db, character.inventory_items),
+        )
         party_characters.append(character)
         actors.append(actor)
     state["actors"] = actors
-    state["party_allsight_level"] = party_allsight_level_from_characters(party_characters)
+    state["party_allsight_level"] = party_allsight_level_from_characters(party_characters, db)
     return state
 
 

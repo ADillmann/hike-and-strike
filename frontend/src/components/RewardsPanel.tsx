@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, REWARDS_BLOCKED_DURING_BATTLE } from '../api/client';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ITEM_TYPE_FILTER_OPTIONS, ItemTypeFilter, itemTypeFilterLabel } from '../utils/itemTypes';
 
 export interface RewardsPayload {
   rewards?: Record<string, unknown>;
@@ -73,6 +74,9 @@ export function RewardsPanel({
   const [wholeParty, setWholeParty] = useState(false);
   const [randomTier, setRandomTier] = useState(1);
   const [randomCount, setRandomCount] = useState(1);
+  const [randomWholeParty, setRandomWholeParty] = useState(true);
+  const [randomCharId, setRandomCharId] = useState(0);
+  const [randomItemType, setRandomItemType] = useState<ItemTypeFilter>('all');
   const [buffLabel, setBuffLabel] = useState('');
   const [buffStat, setBuffStat] = useState('strength');
   const [buffValue, setBuffValue] = useState(1);
@@ -104,6 +108,7 @@ export function RewardsPanel({
       setCurrencyCharId(party[0].id);
       setRemoveCharId(party[0].id);
       setEffectCharId(party[0].id);
+      setRandomCharId(party[0].id);
     }
     if (items[0]) setRewardItemId(items[0].id);
     if (effects[0]) setEffectTemplateId(effects[0].id);
@@ -137,11 +142,14 @@ export function RewardsPanel({
   };
 
   const grantRandom = async () => {
-    await apply({
-      rewards: {
-        random_tier: [{ tier: randomTier, count: randomCount, character_ids: party.map((p) => p.id) }],
-      },
-    });
+    const targets = randomWholeParty ? party.map((p) => p.id) : [randomCharId];
+    const entry: Record<string, unknown> = {
+      tier: randomTier,
+      count: randomCount,
+      character_ids: targets,
+    };
+    if (randomItemType !== 'all') entry.item_type = randomItemType;
+    await apply({ rewards: { random_tier: [entry] } });
   };
 
   const grantBuff = async () => {
@@ -252,10 +260,14 @@ export function RewardsPanel({
   };
 
   const requestRandomConfirm = () => {
+    const typeLabel = itemTypeFilterLabel(randomItemType);
+    const recipientLabel = randomWholeParty
+      ? `all party members (${party.length})`
+      : (party.find((p) => p.id === randomCharId)?.name ?? 'character');
     setPendingConfirm({
       action: 'random',
       title: 'Grant Random Loot',
-      message: `Grant tier ${randomTier} random loot (${randomCount} each) to all party members?`,
+      message: `Grant tier ${randomTier} random ${typeLabel} loot (×${randomCount}) to ${recipientLabel}?`,
       confirmLabel: 'Grant',
     });
   };
@@ -464,15 +476,32 @@ export function RewardsPanel({
 
       {tab === 'random' && (
         <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={randomWholeParty} onChange={(e) => setRandomWholeParty(e.target.checked)} />
+            Whole party
+          </label>
+          {!randomWholeParty && (
+            <select className="input" value={randomCharId} onChange={(e) => setRandomCharId(+e.target.value)}>
+              {party.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">Tier</label>
               <input className="input" type="number" min={1} max={5} value={randomTier} onChange={(e) => setRandomTier(+e.target.value)} />
             </div>
             <div>
-              <label className="label">Count each</label>
+              <label className="label">Count</label>
               <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
             </div>
+          </div>
+          <div>
+            <label className="label">Item type</label>
+            <select className="input" value={randomItemType} onChange={(e) => setRandomItemType(e.target.value as ItemTypeFilter)}>
+              {ITEM_TYPE_FILTER_OPTIONS.map(({ id, label }) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
           </div>
           <button className="btn-secondary w-full" onClick={requestRandomConfirm}>Grant Random Loot</button>
         </div>
@@ -682,12 +711,26 @@ export function formatOutcomeSummary(payload: Record<string, unknown> | null | u
     }
   }
 
-  const randomTier = payload.random_tier as { tier?: number; count?: number; whole_party?: boolean }[] | undefined;
+  const randomTier = payload.random_tier as {
+    tier?: number;
+    count?: number;
+    whole_party?: boolean;
+    character_ids?: number[];
+    item_type?: string;
+  }[] | undefined;
   if (randomTier?.length) {
     for (const entry of randomTier) {
       const tier = entry.tier ?? 1;
       const count = entry.count ?? 1;
-      lines.push(`Random tier ${tier} loot ×${count}${entry.whole_party !== false ? ' (whole party)' : ''}`);
+      const typePart = entry.item_type ? ` ${itemTypeFilterLabel(entry.item_type)}` : '';
+      const who = entry.whole_party !== false && !entry.character_ids?.length
+        ? ' (whole party)'
+        : entry.character_ids?.length === 1
+          ? ''
+          : entry.character_ids?.length
+            ? ` (${entry.character_ids.length} characters)`
+            : ' (whole party)';
+      lines.push(`Random tier ${tier}${typePart} loot ×${count}${who}`);
     }
   }
 
@@ -750,6 +793,7 @@ export function EventOutcomeRewardBuilder({
   const [currencyAmount, setCurrencyAmount] = useState(100);
   const [tier, setTier] = useState(1);
   const [randomCount, setRandomCount] = useState(1);
+  const [randomItemType, setRandomItemType] = useState<ItemTypeFilter>('all');
   const [effectTemplateId, setEffectTemplateId] = useState(effects[0]?.id || 0);
   const [hpChange, setHpChange] = useState(-5);
 
@@ -772,7 +816,9 @@ export function EventOutcomeRewardBuilder({
         return;
       }
       if (rewardType === 'random') {
-        onChange({ random_tier: [{ tier, count: randomCount, whole_party: true }] });
+        const entry: Record<string, unknown> = { tier, count: randomCount, whole_party: true };
+        if (randomItemType !== 'all') entry.item_type = randomItemType;
+        onChange({ random_tier: [entry] });
         return;
       }
       if (rewardType === 'effect' && effectTemplateId) {
@@ -798,6 +844,7 @@ export function EventOutcomeRewardBuilder({
     currencyAmount,
     tier,
     randomCount,
+    randomItemType,
     effectTemplateId,
     hpChange,
   ]);
@@ -847,16 +894,26 @@ export function EventOutcomeRewardBuilder({
             </div>
           )}
           {rewardType === 'random' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label">Tier</label>
-                <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Tier</label>
+                  <input className="input" type="number" min={1} max={5} value={tier} onChange={(e) => setTier(+e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Count each</label>
+                  <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
+                </div>
               </div>
               <div>
-                <label className="label">Count each</label>
-                <input className="input" type="number" min={1} max={5} value={randomCount} onChange={(e) => setRandomCount(+e.target.value)} />
+                <label className="label">Item type</label>
+                <select className="input" value={randomItemType} onChange={(e) => setRandomItemType(e.target.value as ItemTypeFilter)}>
+                  {ITEM_TYPE_FILTER_OPTIONS.map(({ id, label }) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
               </div>
-            </div>
+            </>
           )}
           {rewardType === 'effect' && (
             <select className="input" value={effectTemplateId} onChange={(e) => setEffectTemplateId(+e.target.value)}>
