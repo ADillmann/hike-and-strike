@@ -1,3 +1,5 @@
+import re
+
 from app.game.constants import (
     ARMOR_ITEM_TYPES,
     BATTLE_MODIFIER_KEYS,
@@ -191,6 +193,35 @@ def aggregate_battle_modifiers(temporary_effects) -> dict[str, int]:
             if isinstance(val, (int, float)):
                 totals[key] += int(val)
     return {k: v for k, v in totals.items() if v != 0}
+
+
+def _label_allsight_level(label: str) -> int:
+    normalized = (label or "").strip().lower()
+    if re.search(r"allsight\s*(ii|2)\b", normalized):
+        return 2
+    if re.search(r"allsight\s*(i|1)\b", normalized):
+        return 1
+    return 0
+
+
+def effect_allsight_level(effect) -> int:
+    if not getattr(effect, "active_in_battle", False):
+        return 0
+    val = (getattr(effect, "battle_modifiers", None) or {}).get("allsight")
+    if isinstance(val, (int, float)):
+        if val >= 2:
+            return 2
+        if val >= 1:
+            return 1
+    return _label_allsight_level(getattr(effect, "label", "") or "")
+
+
+def party_allsight_level_from_characters(characters) -> int:
+    level = 0
+    for character in characters:
+        for effect in getattr(character, "temporary_effects", []) or []:
+            level = max(level, effect_allsight_level(effect))
+    return level
 
 
 def is_bag_only_item(item_template) -> bool:

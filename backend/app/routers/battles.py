@@ -20,6 +20,7 @@ from app.services.battle_engine import (
     build_battle_state,
     end_battle,
     perform_action,
+    redact_enemy_hp_for_player,
     skip_prebattle_if_done,
     skip_remaining_prebattle,
     start_battle,
@@ -98,6 +99,13 @@ def _cell_dict(cell) -> dict[str, int] | None:
     if cell is None:
         return None
     return {"x": cell.x, "y": cell.y}
+
+
+def _state_for_user(db: Session, state: dict[str, Any], user: User) -> dict[str, Any]:
+    state = sync_weapon_profiles(db, state)
+    if user.role == UserRole.player:
+        state = redact_enemy_hp_for_player(state)
+    return state
 
 
 async def _broadcast_battle(campaign_id: int, battle_id: int, state: dict) -> None:
@@ -200,7 +208,7 @@ def get_battle(
         character = db.query(Character).filter(Character.user_id == user.id).first()
         character_id = character.id if character else None
     state = battle.state_json or {}
-    state = sync_weapon_profiles(db, state)
+    state = _state_for_user(db, state, user)
     hints = None
     prebattle_hints = None
     active_id = state.get("active_actor_id")
@@ -267,7 +275,7 @@ async def update_positions(
     battle.state_json = new_state
     db.commit()
     await _broadcast_battle(battle.campaign_id, battle.id, new_state)
-    return {"id": battle.id, "state": new_state}
+    return {"id": battle.id, "state": _state_for_user(db, new_state, master)}
 
 
 @router.post("/{battle_id}/prebattle-move")
@@ -298,7 +306,7 @@ async def prebattle_move(
     battle.state_json = new_state
     db.commit()
     await _broadcast_battle(battle.campaign_id, battle.id, new_state)
-    return {"id": battle.id, "state": new_state}
+    return {"id": battle.id, "state": _state_for_user(db, new_state, user)}
 
 
 @router.post("/{battle_id}/start")
@@ -397,7 +405,7 @@ async def battle_action(
     await _broadcast_battle(battle.campaign_id, battle.id, new_state)
     if new_state.get("status") == "completed" and campaign:
         await broadcast_campaign_state(db, battle.campaign_id)
-    return {"id": battle.id, "state": new_state}
+    return {"id": battle.id, "state": _state_for_user(db, new_state, user)}
 
 
 @router.post("/{battle_id}/end")

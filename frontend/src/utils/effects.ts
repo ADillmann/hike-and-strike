@@ -20,5 +20,7 @@ export function formatBattleMods(activeInBattle?: boolean, battleModifiers?: Rec
   const parts: string[] = [];
   if (b.damage_dealt_mod) parts.push(`${b.damage_dealt_mod > 0 ? '+' : ''}${b.damage_dealt_mod} dmg dealt`);
   if (b.heal_mod) parts.push(`${b.heal_mod > 0 ? '+' : ''}${b.heal_mod} heal`);
+  if (b.allsight === 2) parts.push('Allsight II');
+  else if (b.allsight === 1) parts.push('Allsight I');
   return parts.length ? `Battle: ${parts.join(', ')}` : '';
 }

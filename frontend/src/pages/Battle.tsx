@@ -13,6 +13,7 @@ interface Actor {
   name: string;
   current_hp: number;
   max_hp: number;
+  hp_hidden?: boolean;
   alive: boolean;
   initiative_value: number;
   attack_bonus: number;
@@ -292,6 +293,9 @@ export default function BattlePage() {
   const sortedByInitiative = [...state.actors]
     .filter((a) => a.alive)
     .sort((a, b) => b.initiative_value - a.initiative_value);
+
+  const partyActors = state.actors.filter((a) => a.type === 'player');
+  const enemyActors = state.actors.filter((a) => a.type === 'enemy');
 
   return (
     <Layout title="Battle">
@@ -609,14 +613,27 @@ export default function BattlePage() {
             </ul>
           </section>
 
-          <section className="card">
-            <h2 className="mb-2 font-semibold text-dungeon-300">Combatants</h2>
-            <div className="max-h-48 space-y-2 overflow-y-auto">
-              {state.actors.map((a) => (
-                <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} />
-              ))}
-            </div>
-          </section>
+          {partyActors.length > 0 && (
+            <section className="card">
+              <h2 className="mb-2 font-semibold text-dungeon-300">Party</h2>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                  {partyActors.map((a) => (
+                    <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp />
+                  ))}
+              </div>
+            </section>
+          )}
+
+          {enemyActors.length > 0 && (
+            <section className="card">
+              <h2 className="mb-2 font-semibold text-dungeon-300">Enemies</h2>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                  {enemyActors.map((a) => (
+                    <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp={battle.is_master || !a.hp_hidden} />
+                  ))}
+              </div>
+            </section>
+          )}
 
           <section className="card">
             <h2 className="mb-2 font-semibold text-dungeon-300">Battle Log</h2>
@@ -657,15 +674,15 @@ export default function BattlePage() {
   );
 }
 
-function ActorCard({ actor, isActive, isMe }: { actor: Actor; isActive?: boolean; isMe?: boolean }) {
+function ActorCard({ actor, isActive, isMe, hideType, showHp = true }: { actor: Actor; isActive?: boolean; isMe?: boolean; hideType?: boolean; showHp?: boolean }) {
   return (
     <div className={`rounded border p-2 text-sm ${isActive ? 'border-dungeon-400 bg-dungeon-800' : 'border-dungeon-700'} ${!actor.alive ? 'opacity-50' : ''}`}>
       <div className="flex justify-between">
         <span className="font-medium">{actor.name}{isMe ? ' (you)' : ''}</span>
-        <span className="text-xs text-stone-500">{actor.type}</span>
+        {!hideType && <span className="text-xs text-stone-500">{actor.type}</span>}
       </div>
-      <p>HP {actor.current_hp}/{actor.max_hp}</p>
-      {(actor.shield_hp ?? 0) > 0 && <p className="text-xs text-dungeon-300">Shield {actor.shield_hp}</p>}
+      <p>HP {showHp ? `${actor.current_hp}/${actor.max_hp}` : '?'}</p>
+      {showHp && (actor.shield_hp ?? 0) > 0 && <p className="text-xs text-dungeon-300">Shield {actor.shield_hp}</p>}
       {actor.guarding && (
         <p className="text-xs text-blue-300">Guarding (−{Math.round((actor.guard_reduction || 0.3) * 100)}% dmg)</p>
       )}

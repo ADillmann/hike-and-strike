@@ -27,6 +27,7 @@ type EffectForm = {
   stat_modifiers: Record<string, number>;
   damage_dealt_mod: number;
   heal_mod: number;
+  allsight: 0 | 1 | 2;
   active_in_battle: boolean;
   cleared_on_rest: boolean;
   cleared_on_event: boolean;
@@ -40,6 +41,7 @@ const defaultForm = (): EffectForm => ({
   stat_modifiers: {},
   damage_dealt_mod: 0,
   heal_mod: 0,
+  allsight: 0,
   active_in_battle: false,
   cleared_on_rest: true,
   cleared_on_event: false,
@@ -47,6 +49,8 @@ const defaultForm = (): EffectForm => ({
 
 function formFromEffect(effect: EffectTemplate): EffectForm {
   const battle = effect.battle_modifiers || {};
+  const allsightVal = battle.allsight;
+  const allsight: 0 | 1 | 2 = allsightVal === 2 ? 2 : allsightVal === 1 ? 1 : 0;
   return {
     name: effect.name,
     description: effect.description,
@@ -55,6 +59,7 @@ function formFromEffect(effect: EffectTemplate): EffectForm {
     stat_modifiers: { ...effect.stat_modifiers },
     damage_dealt_mod: typeof battle.damage_dealt_mod === 'number' ? battle.damage_dealt_mod : 0,
     heal_mod: typeof battle.heal_mod === 'number' ? battle.heal_mod : 0,
+    allsight,
     active_in_battle: effect.active_in_battle,
     cleared_on_rest: effect.cleared_on_rest,
     cleared_on_event: effect.cleared_on_event,
@@ -70,6 +75,7 @@ function buildPayload(form: EffectForm) {
   if (form.active_in_battle) {
     if (form.damage_dealt_mod !== 0) battle_modifiers.damage_dealt_mod = form.damage_dealt_mod;
     if (form.heal_mod !== 0) battle_modifiers.heal_mod = form.heal_mod;
+    if (form.allsight > 0) battle_modifiers.allsight = form.allsight;
   }
   return {
     name: form.name,
@@ -93,6 +99,8 @@ function effectSummary(effect: EffectTemplate): string {
     const b = effect.battle_modifiers || {};
     if (b.damage_dealt_mod) parts.push(`${b.damage_dealt_mod > 0 ? '+' : ''}${b.damage_dealt_mod} dmg dealt`);
     if (b.heal_mod) parts.push(`${b.heal_mod > 0 ? '+' : ''}${b.heal_mod} heal`);
+    if (b.allsight === 2) parts.push('Allsight II');
+    else if (b.allsight === 1) parts.push('Allsight I');
   }
   return parts.join(', ') || 'No modifiers';
 }
@@ -157,6 +165,19 @@ function EffectFormFields({ form, onChange }: { form: EffectForm; onChange: (nex
               <label className="label">Heal mod</label>
               <input className="input" type="number" value={form.heal_mod} onChange={(e) => set('heal_mod', +e.target.value)} />
               <p className="mt-1 text-xs text-stone-500">Flat bonus/penalty on heal skills.</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Allsight</label>
+              <select
+                className="input"
+                value={form.allsight}
+                onChange={(e) => set('allsight', Number(e.target.value) as 0 | 1 | 2)}
+              >
+                <option value={0}>None</option>
+                <option value={1}>Allsight I (non-boss enemy HP)</option>
+                <option value={2}>Allsight II (all enemy HP)</option>
+              </select>
+              <p className="mt-1 text-xs text-stone-500">Party-wide while any member has this effect in battle.</p>
             </div>
           </div>
         )}
