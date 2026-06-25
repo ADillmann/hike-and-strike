@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_master
 from app.database import get_db
-from app.models import EffectTemplate, ItemTemplate, User
+from app.models import EffectTemplate, ItemTemplate, SkillTemplate, User
 from app.schemas import ItemTemplateCreate, ItemTemplateOut
 
 router = APIRouter(prefix="/items", tags=["items"])
@@ -16,6 +16,11 @@ def _validate_item_payload(db: Session, payload: ItemTemplateCreate) -> None:
         raise HTTPException(status_code=400, detail="Secret items require a secret_template_id")
     if payload.effect_template_id and not db.get(EffectTemplate, payload.effect_template_id):
         raise HTTPException(status_code=400, detail="Effect template not found")
+    if payload.skill_template_id:
+        if payload.item_type != "consumable":
+            raise HTTPException(status_code=400, detail="skill_template_id is only allowed on consumables")
+        if not db.get(SkillTemplate, payload.skill_template_id):
+            raise HTTPException(status_code=400, detail="Skill template not found")
 
 
 @router.get("", response_model=list[ItemTemplateOut])

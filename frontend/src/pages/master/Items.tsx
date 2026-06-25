@@ -12,6 +12,7 @@ interface Item {
   stats: Record<string, unknown>;
   secret_template_id?: number | null;
   effect_template_id?: number | null;
+  skill_template_id?: number | null;
   base_price: number;
   is_system: boolean;
 }
@@ -22,6 +23,11 @@ interface SecretOption {
 }
 
 interface EffectOption {
+  id: number;
+  name: string;
+}
+
+interface SkillOption {
   id: number;
   name: string;
 }
@@ -92,6 +98,7 @@ type ItemForm = {
   passive: boolean;
   secret_template_id: number;
   effect_template_id: number;
+  skill_template_id: number;
   base_price: number;
 };
 
@@ -115,6 +122,7 @@ const defaultForm = (): ItemForm => ({
   passive: false,
   secret_template_id: 0,
   effect_template_id: 0,
+  skill_template_id: 0,
   base_price: 0,
 });
 
@@ -145,6 +153,7 @@ function formFromItem(item: Item): ItemForm {
     passive: Boolean(s.passive),
     secret_template_id: item.secret_template_id ?? 0,
     effect_template_id: item.effect_template_id ?? 0,
+    skill_template_id: item.skill_template_id ?? 0,
     base_price: item.base_price ?? 0,
   };
 }
@@ -233,11 +242,13 @@ function ItemFormFields({
   onChange,
   secrets,
   effects,
+  skills,
 }: {
   form: ItemForm;
   onChange: (next: ItemForm) => void;
   secrets: SecretOption[];
   effects: EffectOption[];
+  skills: SkillOption[];
 }) {
   const set = <K extends keyof ItemForm>(key: K, value: ItemForm[K]) => {
     onChange({ ...form, [key]: value });
@@ -307,17 +318,31 @@ function ItemFormFields({
           <p className="mt-1 text-xs text-stone-500">Puzzle logic and rewards come from the secret template.</p>
         </div>
       ) : isConsumable ? (
-        <div>
-          <label className="label">Healing (HP on use)</label>
-          <input
-            className="input"
-            type="number"
-            min={0}
-            value={form.heal}
-            onChange={(e) => set('heal', +e.target.value)}
-          />
-          <p className="mt-1 text-xs text-stone-500">Leave at 0 for non-healing consumables (e.g. torch, rope).</p>
-        </div>
+        <>
+          <div>
+            <label className="label">Healing (HP on use)</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              value={form.heal}
+              onChange={(e) => set('heal', +e.target.value)}
+            />
+            <p className="mt-1 text-xs text-stone-500">Leave at 0 for non-healing consumables (e.g. torch, rope).</p>
+          </div>
+          <div>
+            <label className="label">Teaches spell (scroll)</label>
+            <select
+              className="input"
+              value={form.skill_template_id}
+              onChange={(e) => set('skill_template_id', +e.target.value)}
+            >
+              <option value={0}>None</option>
+              {skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-stone-500">One-use scroll that permanently teaches the selected spell.</p>
+          </div>
+        </>
       ) : (
         <>
           <fieldset className="space-y-2 rounded border border-dungeon-700 p-3">
@@ -429,6 +454,7 @@ export default function ItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [secrets, setSecrets] = useState<SecretOption[]>([]);
   const [effects, setEffects] = useState<EffectOption[]>([]);
+  const [skills, setSkills] = useState<SkillOption[]>([]);
   const [form, setForm] = useState<ItemForm>(defaultForm);
   const [editing, setEditing] = useState<{ id: number; is_system: boolean; form: ItemForm } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -440,6 +466,7 @@ export default function ItemsPage() {
     api.get<Item[]>('/items').then(setItems);
     api.get<SecretOption[]>('/secrets').then(setSecrets);
     api.get<EffectOption[]>('/effects').then(setEffects);
+    api.get<SkillOption[]>('/skills').then(setSkills);
   };
 
   useEffect(() => { load(); }, []);
@@ -452,6 +479,7 @@ export default function ItemsPage() {
     stats: buildStats(f),
     secret_template_id: f.item_type === 'secret' ? f.secret_template_id || null : null,
     effect_template_id: f.effect_template_id || null,
+    skill_template_id: f.item_type === 'consumable' ? f.skill_template_id || null : null,
     base_price: f.base_price,
   });
 
@@ -481,7 +509,7 @@ export default function ItemsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <form onSubmit={create} className="card space-y-3">
           <h2 className="font-semibold text-dungeon-300">Custom Item</h2>
-          <ItemFormFields form={form} onChange={setForm} secrets={secrets} effects={effects} />
+          <ItemFormFields form={form} onChange={setForm} secrets={secrets} effects={effects} skills={skills} />
           <button className="btn-primary" type="submit">Add Item</button>
         </form>
 
@@ -514,6 +542,9 @@ export default function ItemsPage() {
               const effectName = item.effect_template_id
                 ? effects.find((e) => e.id === item.effect_template_id)?.name
                 : null;
+              const teachName = item.skill_template_id
+                ? skills.find((s) => s.id === item.skill_template_id)?.name
+                : null;
               return (
                 <div key={item.id} className="rounded border border-dungeon-600 p-2 text-sm">
                   <div className="flex justify-between gap-2">
@@ -534,6 +565,9 @@ export default function ItemsPage() {
                   )}
                   {effectName && (
                     <p className="text-xs text-dungeon-300">Effect: {effectName}</p>
+                  )}
+                  {teachName && (
+                    <p className="text-xs text-dungeon-300">Teaches: {teachName}</p>
                   )}
                   <div className="mt-1 flex gap-1">
                     <button
@@ -562,7 +596,7 @@ export default function ItemsPage() {
               Edit Item
               {editing.is_system && <span className="ml-2 text-sm font-normal text-dungeon-400">(base item)</span>}
             </h3>
-            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} secrets={secrets} effects={effects} />
+            <ItemFormFields form={editing.form} onChange={(next) => setEditing({ ...editing, form: next })} secrets={secrets} effects={effects} skills={skills} />
             <div className="flex gap-2">
               <button className="btn-primary" onClick={saveEdit}>Save</button>
               <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>

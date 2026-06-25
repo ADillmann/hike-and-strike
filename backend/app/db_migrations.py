@@ -122,6 +122,12 @@ def apply_schema_patches(engine: Engine) -> None:
     )
     _add_column_if_missing(
         engine,
+        "item_templates",
+        "skill_template_id",
+        "skill_template_id INTEGER REFERENCES skill_templates(id)",
+    )
+    _add_column_if_missing(
+        engine,
         "inventory_items",
         "secret_state",
         "secret_state TEXT DEFAULT '{}'",

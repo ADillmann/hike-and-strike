@@ -326,6 +326,7 @@ class ItemTemplateCreate(BaseModel):
     description: str = ""
     secret_template_id: int | None = None
     effect_template_id: int | None = None
+    skill_template_id: int | None = None
     base_price: int = 0
 
 
@@ -338,6 +339,7 @@ class ItemTemplateOut(BaseModel):
     description: str
     secret_template_id: int | None = None
     effect_template_id: int | None = None
+    skill_template_id: int | None = None
     base_price: int = 0
     is_system: bool
 
@@ -407,6 +409,7 @@ class GiveItemRequest(BaseModel):
 
 class UseItemRequest(BaseModel):
     inventory_item_id: int
+    replace_skill_id: int | None = None
 
 
 class UseSkillRequest(BaseModel):

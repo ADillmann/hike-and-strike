@@ -147,11 +147,13 @@ class ItemTemplate(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     secret_template_id: Mapped[int | None] = mapped_column(ForeignKey("secret_templates.id"), nullable=True)
     effect_template_id: Mapped[int | None] = mapped_column(ForeignKey("effect_templates.id"), nullable=True)
+    skill_template_id: Mapped[int | None] = mapped_column(ForeignKey("skill_templates.id"), nullable=True)
     base_price: Mapped[int] = mapped_column(Integer, default=0)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     secret_template: Mapped["SecretTemplate | None"] = relationship(back_populates="item_templates")
+    skill_template: Mapped["SkillTemplate | None"] = relationship()
     inventory_items: Mapped[list["InventoryItem"]] = relationship(back_populates="item_template")
 
 

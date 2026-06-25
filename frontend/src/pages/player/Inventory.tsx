@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../api/client';
+import { api, ApiError, isSkillCapError } from '../../api/client';
 import { AlertDialog } from '../../components/AlertDialog';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { SOLVER_MODALS } from '../../components/secrets/solverRegistry';
@@ -37,8 +37,9 @@ function showQuantity(item: InvItem): boolean {
   return (item.item_type || '').toLowerCase() === 'consumable' && item.quantity > 1;
 }
 
-function formatStats(stats: Record<string, unknown>): string[] {
+function formatStats(stats: Record<string, unknown>, teachesSkillName?: string | null): string[] {
   const lines: string[] = [];
+  if (teachesSkillName) lines.push(`Teaches ${teachesSkillName} permanently`);
   if (stats.passive) lines.push('Passive — works from bag');
   if (stats.two_handed) lines.push('Two-handed — needs both hands');
   if (typeof stats.damage === 'number') lines.push(`Damage ${stats.damage}`);
@@ -97,7 +98,7 @@ function ItemCard({
 }) {
   const [giveOpen, setGiveOpen] = useState(false);
   const [targetId, setTargetId] = useState(() => party.find((p) => !p.is_self)?.character_id || 0);
-  const statLines = formatStats(item.stats);
+  const statLines = formatStats(item.stats, item.teaches_skill_name);
   const inBag = !item.equipped_slot;
   const action = getItemAction(item);
   const revealed = Boolean(item.secret_state?.revealed);
@@ -282,6 +283,13 @@ export default function InventoryPage() {
   const [solveBusy, setSolveBusy] = useState(false);
   const [secretMessages, setSecretMessages] = useState<Record<number, string>>({});
   const [solveRewardSummary, setSolveRewardSummary] = useState<string[] | null>(null);
+  const [replaceScroll, setReplaceScroll] = useState<{
+    inventoryItemId: number;
+    skills: { id: number; name: string }[];
+    skillToLearn: string;
+    selectedSkillId: number;
+  } | null>(null);
+  const [replaceBusy, setReplaceBusy] = useState(false);
   const navigate = useNavigate();
 
   const load = () => {
@@ -308,14 +316,55 @@ export default function InventoryPage() {
     load();
   };
 
-  const useItem = async (inventoryItemId: number) => {
+  const useItem = async (inventoryItemId: number, replaceSkillId?: number) => {
     setError('');
     try {
-      await api.post('/characters/me/use-item', { inventory_item_id: inventoryItemId });
+      await api.post('/characters/me/use-item', {
+        inventory_item_id: inventoryItemId,
+        ...(replaceSkillId != null ? { replace_skill_id: replaceSkillId } : {}),
+      });
+      setReplaceScroll(null);
       load();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && isSkillCapError(err.detail)) {
+        const firstSkill = err.detail.skills[0];
+        setReplaceScroll({
+          inventoryItemId,
+          skills: err.detail.skills,
+          skillToLearn: err.detail.skill_to_learn.name,
+          selectedSkillId: firstSkill?.id ?? 0,
+        });
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Could not use item');
     }
+  };
+
+  const confirmReplaceScroll = async () => {
+    if (!replaceScroll || !replaceScroll.selectedSkillId) return;
+    setReplaceBusy(true);
+    setError('');
+    try {
+      await useItem(replaceScroll.inventoryItemId, replaceScroll.selectedSkillId);
+    } finally {
+      setReplaceBusy(false);
+    }
+  };
+
+  const handleUseItem = (inventoryItemId: number) => {
+    const item = character?.inventory.find((i) => i.id === inventoryItemId);
+    const isScroll = Boolean(item?.skill_template_id);
+    const atCap = (character?.skills.length ?? 0) >= 20;
+    if (isScroll && atCap && character) {
+      setReplaceScroll({
+        inventoryItemId,
+        skills: character.skills.map((s) => ({ id: s.id, name: s.name })),
+        skillToLearn: item?.teaches_skill_name || 'new spell',
+        selectedSkillId: character.skills[0]?.id ?? 0,
+      });
+      return;
+    }
+    void useItem(inventoryItemId);
   };
 
   const examineSecret = async (item: InvItem) => {
@@ -443,7 +492,7 @@ export default function InventoryPage() {
               party={party}
               hasParty={hasParty}
               onEquip={equip}
-              onUse={useItem}
+              onUse={handleUseItem}
               onExamine={examineSecret}
               onSolve={setSolveItem}
               onGive={giveItem}
@@ -478,6 +527,44 @@ export default function InventoryPage() {
           />
         );
       })()}
+
+      {replaceScroll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card w-full max-w-md space-y-3">
+            <h3 className="font-semibold text-dungeon-200">Replace a spell</h3>
+            <p className="text-sm text-stone-400">
+              You already know 20 spells. Choose which spell to forget so you can learn{' '}
+              <span className="text-dungeon-200">{replaceScroll.skillToLearn}</span>.
+            </p>
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {replaceScroll.skills.map((skill) => (
+                <label key={skill.id} className="flex cursor-pointer items-center gap-2 rounded border border-dungeon-700 p-2 text-sm">
+                  <input
+                    type="radio"
+                    name="replace-skill"
+                    checked={replaceScroll.selectedSkillId === skill.id}
+                    onChange={() => setReplaceScroll({ ...replaceScroll, selectedSkillId: skill.id })}
+                  />
+                  <span>{skill.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!replaceScroll.selectedSkillId || replaceBusy}
+                onClick={confirmReplaceScroll}
+              >
+                {replaceBusy ? 'Learning…' : 'Learn spell'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setReplaceScroll(null)} disabled={replaceBusy}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {solveRewardSummary !== null && (
         <AlertDialog

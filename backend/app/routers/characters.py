@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.config import settings
 from app.database import get_db
-from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, STAT_CAP, STAT_NAMES
+from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, MAX_CHARACTER_SKILLS, STAT_CAP, STAT_NAMES
 from app.models import (
     Character,
     GroupMember,
@@ -89,6 +89,60 @@ def _add_skill_templates(db: Session, character_id: int, template_ids: list[int]
         db.add(skill_from_template(character_id, template))
 
 
+def _learn_skill_from_scroll(
+    db: Session,
+    character: Character,
+    skill_template_id: int,
+    replace_skill_id: int | None,
+) -> None:
+    template = db.get(SkillTemplate, skill_template_id)
+    if not template:
+        raise HTTPException(status_code=400, detail="Skill template not found")
+
+    existing = (
+        db.query(Skill)
+        .filter(Skill.character_id == character.id, Skill.skill_template_id == skill_template_id)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="You already know this spell")
+
+    skill_count = db.query(Skill).filter(Skill.character_id == character.id).count()
+    if skill_count >= MAX_CHARACTER_SKILLS:
+        if replace_skill_id is None:
+            skills = (
+                db.query(Skill)
+                .filter(Skill.character_id == character.id)
+                .order_by(Skill.name)
+                .all()
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "skill_cap_reached",
+                    "message": "Choose a spell to replace",
+                    "skills": [
+                        {
+                            "id": s.id,
+                            "name": s.name,
+                            "skill_template_id": s.skill_template_id,
+                        }
+                        for s in skills
+                    ],
+                    "skill_to_learn": {
+                        "skill_template_id": template.id,
+                        "name": template.name,
+                    },
+                },
+            )
+        skill_to_replace = db.get(Skill, replace_skill_id)
+        if not skill_to_replace or skill_to_replace.character_id != character.id:
+            raise HTTPException(status_code=404, detail="Skill to replace not found")
+        db.delete(skill_to_replace)
+
+    db.add(skill_from_template(character.id, template))
+
+
 def _serialize_inventory_item(inv: InventoryItem, db: Session) -> dict[str, Any]:
     template = inv.item_template
     secret = template.secret_template if template else None
@@ -116,6 +170,11 @@ def _serialize_inventory_item(inv: InventoryItem, db: Session) -> dict[str, Any]
         "base_price": base_price,
         "price_display": format_price(base_price, settings) if base_price > 0 else None,
     }
+    if template and template.skill_template_id:
+        entry["skill_template_id"] = template.skill_template_id
+        teaches = template.skill_template.name if template.skill_template else None
+        if teaches:
+            entry["teaches_skill_name"] = teaches
     if is_secret:
         entry.update(secret_inventory_payload(inv, secret))
     return entry
@@ -127,6 +186,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         db.query(Character)
         .options(
             joinedload(Character.inventory_items).joinedload(InventoryItem.item_template).joinedload(ItemTemplate.secret_template),
+            joinedload(Character.inventory_items).joinedload(InventoryItem.item_template).joinedload(ItemTemplate.skill_template),
             joinedload(Character.skills).joinedload(Skill.skill_template),
             joinedload(Character.temporary_effects),
             joinedload(Character.user),
@@ -682,6 +742,9 @@ async def use_item(
     heal = stats.get("heal", 0)
     if isinstance(heal, int) and heal > 0:
         character.current_hp = min(character.max_hp, character.current_hp + heal)
+
+    if template.skill_template_id:
+        _learn_skill_from_scroll(db, character, template.skill_template_id, payload.replace_skill_id)
 
     if inv.quantity > 1:
         inv.quantity -= 1

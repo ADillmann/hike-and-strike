@@ -3,6 +3,46 @@ export const REWARDS_BLOCKED_DURING_BATTLE =
 
 const API = '/api';
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(status: number, detail: unknown, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+export interface SkillCapErrorDetail {
+  code: 'skill_cap_reached';
+  message: string;
+  skills: { id: number; name: string; skill_template_id: number | null }[];
+  skill_to_learn: { skill_template_id: number; name: string };
+}
+
+export function isSkillCapError(detail: unknown): detail is SkillCapErrorDetail {
+  return (
+    typeof detail === 'object'
+    && detail !== null
+    && (detail as SkillCapErrorDetail).code === 'skill_cap_reached'
+  );
+}
+
+function errorMessage(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || 'Request failed';
+  }
+  if (isSkillCapError(detail)) return detail.message;
+  if (typeof detail === 'object' && detail !== null && 'message' in detail) {
+    const msg = (detail as { message?: unknown }).message;
+    if (typeof msg === 'string') return msg;
+  }
+  return 'Request failed';
+}
+
 export function getToken(): string | null {
   return localStorage.getItem('token');
 }
@@ -29,13 +69,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const detail = err.detail;
-    const message =
-      typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || 'Request failed'
-          : 'Request failed';
-    throw new Error(message);
+    throw new ApiError(res.status, detail, errorMessage(detail));
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -109,6 +143,8 @@ export interface Character {
     revealed_description?: string;
     secret_solver_type?: string;
     secret_solver_hints?: Record<string, unknown>;
+    skill_template_id?: number | null;
+    teaches_skill_name?: string | null;
   }[];
   temporary_effects: {
     id: number;
