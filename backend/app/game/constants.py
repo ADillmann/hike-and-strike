@@ -32,7 +32,11 @@ STARTER_SKILLS = [
 
 SKILL_EFFECT_TYPES = ("none", "heal", "melee", "range", "support")
 
-SUPPORT_MODES = ("shield", "stat_boost")
+SUPPORT_MODES = ("shield", "stat_boost", "damage_boost", "apply_effect")
+SUPPORT_TARGET_SCOPES = ("single", "party")
+SPLASH_RADIUS_OPTIONS = (0, 1, 2)
+DEFAULT_SKILL_RANGE = 4
+SPLASH_EFFECT_FACTOR = 0.5
 
 # Legacy name → effect when skill_template_id is missing
 LEGACY_SKILL_EFFECTS = {

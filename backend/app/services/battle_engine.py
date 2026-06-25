@@ -4,8 +4,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.game.constants import HAND_SLOTS
-from app.models import Character, EnemyTemplate, InventoryItem, Skill, SkillTemplate
+from app.game.constants import (
+    DEFAULT_SKILL_RANGE,
+    HAND_SLOTS,
+    SPLASH_EFFECT_FACTOR,
+)
+from app.models import Character, EffectTemplate, EnemyTemplate, InventoryItem, Skill, SkillTemplate
 from app.services.battle_geometry import (
     DEFAULT_RANGE_DISTANCE,
     GUARD_BASE_REDUCTION,
@@ -399,10 +403,20 @@ def sync_weapon_profiles(db: Session, state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def _party_allsight_from_state(state: dict[str, Any]) -> int:
+    peak = int(state.get("party_allsight_level", 0) or 0)
+    for actor in state.get("actors", []):
+        if actor.get("type") != "player" or not actor.get("alive"):
+            continue
+        val = int((actor.get("battle_modifiers") or {}).get("allsight", 0) or 0)
+        peak = max(peak, val)
+    return peak
+
+
 def redact_enemy_hp_for_player(state: dict[str, Any]) -> dict[str, Any]:
     """Mark enemy actors with hp_hidden when the party lacks sufficient Allsight."""
     state = dict(state)
-    level = int(state.get("party_allsight_level", 0) or 0)
+    level = _party_allsight_from_state(state)
     actors: list[dict[str, Any]] = []
     for actor in state.get("actors", []):
         entry = dict(actor)
@@ -751,7 +765,7 @@ def _execute_melee_attack(
         msg += f" ({guard_red} reduced by guard)"
     if not target["alive"]:
         msg += f" {target['name']} is defeated!"
-    return msg
+    return msg, damage
 
 
 def _execute_ranged_attack(state: dict, actor: dict, target: dict) -> str:
@@ -773,6 +787,87 @@ def _execute_ranged_attack(state: dict, actor: dict, target: dict) -> str:
     return msg
 
 
+def _skill_max_range(params: dict) -> int:
+    return int(params.get("range", DEFAULT_SKILL_RANGE))
+
+
+def _is_party_wide_support(params: dict) -> bool:
+    return params.get("target_scope") == "party"
+
+
+def _support_recipients(state: dict, target: dict | None, params: dict) -> list[dict]:
+    if _is_party_wide_support(params):
+        return [a for a in state.get("actors", []) if a.get("type") == "player" and a.get("alive")]
+    if target and target.get("type") == "player" and target.get("alive"):
+        return [target]
+    return []
+
+
+def _apply_battle_effect_template_to_actor(actor: dict, template: EffectTemplate) -> None:
+    mods = dict(actor.get("battle_stat_mods") or {})
+    for stat, val in (template.stat_modifiers or {}).items():
+        mods[stat] = int(mods.get(stat, 0)) + int(val)
+    actor["battle_stat_mods"] = mods
+    bmods = dict(actor.get("battle_modifiers") or {})
+    for key, val in (template.battle_modifiers or {}).items():
+        bmods[key] = int(bmods.get(key, 0)) + int(val)
+    actor["battle_modifiers"] = bmods
+
+
+def _apply_support_to_actor(
+    recipient: dict,
+    params: dict,
+    db: Session | None,
+) -> str:
+    mode = params.get("support_mode", "shield")
+    if mode == "shield":
+        amount = int(params.get("shield_amount", 5))
+        recipient["shield_hp"] = int(recipient.get("shield_hp") or 0) + amount
+        return f"{amount} shield HP"
+    if mode == "stat_boost":
+        stat = params.get("stat", "strength")
+        bonus = int(params.get("stat_bonus", 1))
+        mods = dict(recipient.get("battle_stat_mods") or {})
+        mods[stat] = int(mods.get(stat, 0)) + bonus
+        recipient["battle_stat_mods"] = mods
+        if stat == "strength":
+            gain = bonus // 3
+            if gain:
+                recipient["attack_bonus"] = recipient.get("attack_bonus", 0) + gain
+        return f"+{bonus} {stat}"
+    if mode == "damage_boost":
+        amount = int(params.get("damage_boost_amount", 1))
+        bmods = dict(recipient.get("battle_modifiers") or {})
+        bmods["damage_dealt_mod"] = int(bmods.get("damage_dealt_mod", 0)) + amount
+        recipient["battle_modifiers"] = bmods
+        return f"+{amount} damage dealt"
+    if mode == "apply_effect":
+        if not db:
+            raise ValueError("Effect unavailable")
+        tid = params.get("effect_template_id")
+        template = db.get(EffectTemplate, tid)
+        if not template or not template.active_in_battle:
+            raise ValueError("Effect unavailable")
+        _apply_battle_effect_template_to_actor(recipient, template)
+        return template.label or template.name
+    raise ValueError("Unknown support mode")
+
+
+def _apply_heal_splash(state: dict, primary: dict, radius: int, heal_amount: int) -> str:
+    center = actor_pos(primary)
+    splash_heal = max(1, int(heal_amount * SPLASH_EFFECT_FACTOR))
+    extra = ""
+    for cell in cells_in_radius(center, radius):
+        for other in state.get("actors", []):
+            if other["id"] == primary["id"] or not other["alive"]:
+                continue
+            if actor_pos(other) != cell or other["type"] != "player":
+                continue
+            other["current_hp"] = min(other["max_hp"], other["current_hp"] + splash_heal)
+            extra += f" {other['name']} +{splash_heal} HP (splash)!"
+    return extra
+
+
 def _find_skill(actor: dict, skill_id: int | str | None, action: str) -> dict | None:
     skills = actor.get("skills", [])
     if skill_id is not None:
@@ -786,7 +881,14 @@ def _find_skill(actor: dict, skill_id: int | str | None, action: str) -> dict | 
     return None
 
 
-def _apply_skill(state: dict, actor: dict, target: dict | None, skill: dict, charge_cell: dict | None) -> str:
+def _apply_skill(
+    state: dict,
+    actor: dict,
+    target: dict | None,
+    skill: dict,
+    charge_cell: dict | None,
+    db: Session | None = None,
+) -> str:
     effect = normalize_effect_type(skill.get("effect_type", "none"))
     params = skill.get("effect_params") or {}
     name = skill.get("name", "Skill")
@@ -794,11 +896,18 @@ def _apply_skill(state: dict, actor: dict, target: dict | None, skill: dict, cha
     if effect == "heal":
         if not target or target["type"] != "player" or not target["alive"]:
             raise ValueError("Invalid heal target")
+        max_range = _skill_max_range(params)
+        if not can_range_attack(state, actor, target, max_range):
+            raise ValueError("Out of range")
         heal_base = int(params.get("heal_base", 5))
         heal_amount = max(1, heal_base + _actor_stat(actor, "intelligence") // 2 + _battle_heal_mod(actor))
         target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal_amount)
         skill["uses_remaining"] -= 1
-        return f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!"
+        msg = f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!"
+        splash_radius = int(params.get("splash_radius", 0))
+        if splash_radius > 0:
+            msg += _apply_heal_splash(state, target, splash_radius, heal_amount)
+        return msg
 
     splash_radius = int(params.get("splash_radius", 0))
 
@@ -807,16 +916,16 @@ def _apply_skill(state: dict, actor: dict, target: dict | None, skill: dict, cha
             raise ValueError("Invalid target")
         if not can_melee_attack(state, actor, target):
             raise ValueError("Cannot reach target")
-        msg = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
+        msg, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
         skill["uses_remaining"] -= 1
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, params)
+            msg += _apply_splash(state, actor, target, splash_radius, primary_damage)
         return msg.replace(f"{actor['name']} attacks", f"{actor['name']} uses {name} on", 1)
 
     if effect == "range":
         if not target or not target["alive"] or actor["type"] == target["type"]:
             raise ValueError("Invalid target")
-        max_range = int(params.get("range", DEFAULT_RANGE_DISTANCE))
+        max_range = _skill_max_range(params)
         if not can_range_attack(state, actor, target, max_range):
             raise ValueError("No line of sight or out of range")
         bonus = int(params.get("bonus_damage", 0))
@@ -833,31 +942,21 @@ def _apply_skill(state: dict, actor: dict, target: dict | None, skill: dict, cha
         if not target["alive"]:
             msg += f" {target['name']} is defeated!"
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, params)
+            msg += _apply_splash(state, actor, target, splash_radius, damage)
         return msg
 
     if effect == "support":
-        if not target or target["type"] != "player" or not target["alive"]:
+        recipients = _support_recipients(state, target, params)
+        if not recipients:
             raise ValueError("Invalid support target")
-        mode = params.get("support_mode", "shield")
-        if mode == "shield":
-            amount = int(params.get("shield_amount", 5))
-            target["shield_hp"] = int(target.get("shield_hp") or 0) + amount
-            skill["uses_remaining"] -= 1
-            return f"{actor['name']} uses {name} — {target['name']} gains {amount} shield HP!"
-        if mode == "stat_boost":
-            stat = params.get("stat", "strength")
-            bonus = int(params.get("stat_bonus", 1))
-            mods = dict(target.get("battle_stat_mods") or {})
-            mods[stat] = int(mods.get(stat, 0)) + bonus
-            target["battle_stat_mods"] = mods
-            if stat == "strength":
-                gain = bonus // 3
-                if gain:
-                    target["attack_bonus"] = target.get("attack_bonus", 0) + gain
-            skill["uses_remaining"] -= 1
-            return f"{actor['name']} uses {name} — {target['name']} gains +{bonus} {stat} for this battle!"
-        raise ValueError("Unknown support mode")
+        details: list[str] = []
+        for recipient in recipients:
+            detail = _apply_support_to_actor(recipient, params, db)
+            details.append(f"{recipient['name']} ({detail})")
+        skill["uses_remaining"] -= 1
+        if _is_party_wide_support(params):
+            return f"{actor['name']} uses {name} on the party — " + "; ".join(details) + "!"
+        return f"{actor['name']} uses {name} — " + "; ".join(details) + "!"
     raise ValueError("Skill not usable in battle")
 
 
@@ -882,16 +981,16 @@ def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, char
             raise ValueError("Invalid target")
         if not can_melee_attack(state, actor, target):
             raise ValueError("Cannot reach target")
-        msg = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=True)
+        msg, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=True)
         skill["uses_remaining"] -= 1
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, params)
+            msg += _apply_splash(state, actor, target, splash_radius, primary_damage)
         return msg.replace(f"{actor['name']} attacks", f"{actor['name']} casts {name} on", 1)
 
     if effect == "range":
         if not target or not target["alive"] or target["type"] != "player":
             raise ValueError("Invalid target")
-        max_range = int(params.get("range", DEFAULT_RANGE_DISTANCE))
+        max_range = _skill_max_range(params)
         if not can_range_attack(state, actor, target, max_range):
             raise ValueError("No line of sight or out of range")
         bonus = int(params.get("bonus_damage", 0))
@@ -908,15 +1007,15 @@ def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, char
         if not target["alive"]:
             msg += f" {target['name']} is defeated!"
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, params)
+            msg += _apply_splash(state, actor, target, splash_radius, damage)
         return msg
 
     raise ValueError("Skill not usable in battle")
 
 
-def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, params: dict) -> str:
+def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, primary_damage: int) -> str:
     center = actor_pos(primary)
-    bonus = int(params.get("bonus_damage", 0))
+    splash_dmg = max(1, int(primary_damage * SPLASH_EFFECT_FACTOR))
     extra = ""
     for cell in cells_in_radius(center, radius):
         for other in state.get("actors", []):
@@ -926,10 +1025,10 @@ def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, params: 
                 continue
             if other["type"] == actor["type"]:
                 continue
-            roll = random.randint(1, 4)
-            dmg = max(1, roll + bonus - _mitigation(other))
-            _apply_damage(other, dmg)
-            extra += f" Splash hits {other['name']} for {dmg}!"
+            _, shield_abs, _ = _apply_damage(other, splash_dmg)
+            extra += f" Splash hits {other['name']} for {splash_dmg}!"
+            if shield_abs:
+                extra += f" ({shield_abs} absorbed)"
             if not other["alive"]:
                 extra += f" {other['name']} falls!"
     return extra
@@ -945,6 +1044,7 @@ def perform_action(
     move_cell: dict[str, int] | None = None,
     guard_cell: dict[str, int] | None = None,
     inventory_item_id: int | None = None,
+    db: Session | None = None,
 ) -> tuple[dict[str, Any], str]:
     state = dict(state)
     actors = [dict(a) for a in state["actors"]]
@@ -971,7 +1071,7 @@ def perform_action(
                 return {**state, "actors": actors}, "Invalid target"
             if not can_melee_attack(state, actor, target):
                 return {**state, "actors": actors}, "Target blocked or unreachable"
-            log_msg = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
+            log_msg, _ = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
 
         elif action == "ranged_attack":
             if actor["type"] != "player":
@@ -1042,18 +1142,22 @@ def perform_action(
             effect = normalize_effect_type(skill.get("effect_type", "none"))
             if effect == "none":
                 return {**state, "actors": actors}, "Skill not usable in battle"
+            params = skill.get("effect_params") or {}
+            party_wide = effect == "support" and _is_party_wide_support(params)
             target = actor
             if effect in ("heal", "support"):
-                if target_id:
+                if not party_wide and target_id:
                     target = next((a for a in actors if a["id"] == target_id), None)
             else:
                 if not target_id:
                     return {**state, "actors": actors}, "Target required"
                 target = next((a for a in actors if a["id"] == target_id), None)
             skill_ref = next((s for s in actor.get("skills", []) if s["id"] == skill["id"]), None)
-            if not skill_ref or not target:
+            if not skill_ref:
                 return {**state, "actors": actors}, "Skill unavailable"
-            log_msg = _apply_skill(state, actor, target, skill_ref, charge_cell)
+            if not party_wide and not target:
+                return {**state, "actors": actors}, "Skill unavailable"
+            log_msg = _apply_skill(state, actor, target, skill_ref, charge_cell, db=db)
 
         elif action == "enemy_attack":
             if actor["type"] != "enemy":
@@ -1066,7 +1170,7 @@ def perform_action(
                 return {**state, "actors": actors}, "No valid target"
             if not can_melee_attack({**state, "actors": actors}, actor, target):
                 return {**state, "actors": actors}, "No valid target"
-            log_msg = _execute_melee_attack(state, actor, target, None, is_enemy=True)
+            log_msg, _ = _execute_melee_attack(state, actor, target, None, is_enemy=True)
 
         elif action == "enemy_ranged_attack":
             if actor["type"] != "enemy":
@@ -1256,6 +1360,53 @@ def sync_party_hp_to_characters(db: Session, state: dict[str, Any]) -> None:
                     inv.quantity = max(0, cons.get("quantity", inv.quantity))
 
 
+def _build_skill_targets(state: dict[str, Any], actor: dict) -> dict[str, Any]:
+    skill_targets: dict[str, Any] = {}
+    for skill in actor.get("skills", []):
+        if skill.get("uses_remaining", 0) <= 0:
+            continue
+        effect = normalize_effect_type(skill.get("effect_type", ""))
+        if effect == "none":
+            continue
+        params = skill.get("effect_params") or {}
+        sid = str(skill["id"])
+        entry: dict[str, Any] = {"allies": [], "enemies": [], "party_wide": False}
+        if effect == "support" and _is_party_wide_support(params):
+            entry["party_wide"] = True
+        elif effect in ("heal", "support"):
+            max_range = _skill_max_range(params)
+            for other in state.get("actors", []):
+                if other.get("type") != "player" or not other.get("alive"):
+                    continue
+                if effect == "support" or can_range_attack(state, actor, other, max_range):
+                    entry["allies"].append({
+                        "id": other["id"],
+                        "name": other.get("name", "Ally"),
+                        "current_hp": other.get("current_hp", 0),
+                        "max_hp": other.get("max_hp", 0),
+                    })
+        elif effect == "melee":
+            for other in state.get("actors", []):
+                if other["id"] == actor["id"] or not other["alive"] or other["type"] == actor["type"]:
+                    continue
+                if can_melee_attack(state, actor, other):
+                    charge_cells = []
+                    if not is_adjacent(actor_pos(actor), actor_pos(other)):
+                        charge_cells = [
+                            {"x": x, "y": y} for x, y in reachable_charge_cells(state, actor, other)
+                        ]
+                    entry["enemies"].append({"id": other["id"], "charge_cells": charge_cells})
+        elif effect == "range":
+            max_range = _skill_max_range(params)
+            for other in state.get("actors", []):
+                if other["id"] == actor["id"] or not other["alive"] or other["type"] == actor["type"]:
+                    continue
+                if can_range_attack(state, actor, other, max_range):
+                    entry["enemies"].append(other["id"])
+        skill_targets[sid] = entry
+    return skill_targets
+
+
 def battle_action_hints(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
     """Legal targets and cells for UI."""
     actor = _get_actor(state, actor_id)
@@ -1269,6 +1420,7 @@ def battle_action_hints(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
         "range_targets": [],
         "skill_range_targets": [],
         "ally_targets": [],
+        "skill_targets": _build_skill_targets(state, actor),
         "can_melee": bool(wp.get("can_melee")),
         "can_ranged": bool(wp.get("can_ranged")),
     }

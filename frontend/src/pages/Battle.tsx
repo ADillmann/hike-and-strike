@@ -26,7 +26,7 @@ interface Actor {
   position: { x: number; y: number };
   battle_stat_mods?: Record<string, number>;
   battle_modifiers?: Record<string, number>;
-  skills?: { id: number; name: string; uses_remaining: number; effect_type?: string }[];
+  skills?: { id: number; name: string; uses_remaining: number; effect_type?: string; effect_params?: Record<string, string | number> }[];
   consumables?: { inventory_item_id: number; name: string; heal: number; quantity: number }[];
   weapon_profile?: {
     can_melee: boolean;
@@ -37,6 +37,12 @@ interface Actor {
   };
 }
 
+interface SkillTargetEntry {
+  allies: { id: string; name: string; current_hp: number; max_hp: number }[];
+  enemies: string[] | { id: string; charge_cells: { x: number; y: number }[] }[];
+  party_wide: boolean;
+}
+
 interface ActionHints {
   move_cells: { x: number; y: number }[];
   guard_cells: { x: number; y: number }[];
@@ -44,6 +50,7 @@ interface ActionHints {
   range_targets: string[];
   skill_range_targets?: string[];
   ally_targets?: { id: string; name: string; current_hp: number; max_hp: number }[];
+  skill_targets?: Record<string, SkillTargetEntry>;
   can_melee?: boolean;
   can_ranged?: boolean;
 }
@@ -87,6 +94,10 @@ function normalizeEffect(type?: string): string {
   if (type === 'power_strike') return 'melee';
   if (type === 'arcane_bolt') return 'range';
   return type || 'none';
+}
+
+function skillTargetEntry(hints: ActionHints | null | undefined, skillId: number): SkillTargetEntry | null {
+  return hints?.skill_targets?.[String(skillId)] ?? null;
 }
 
 function chebyshevCells(
@@ -434,10 +445,15 @@ export default function BattlePage() {
                       className="btn-secondary text-xs"
                       onClick={() => {
                         const eff = normalizeEffect(s.effect_type);
+                        const targets = skillTargetEntry(hints, s.id);
+                        if (eff === 'support' && targets?.party_wide) {
+                          postAction({ action: 'skill', actor_id: state.active_actor_id, skill_id: s.id });
+                          return;
+                        }
                         if (eff === 'heal' || eff === 'support') {
-                          const allies = hints?.ally_targets || [];
+                          const allies = targets?.allies || hints?.ally_targets || [];
                           if (allies.length <= 1) {
-                            postAction({ action: 'skill', actor_id: state.active_actor_id, skill_id: s.id });
+                            postAction({ action: 'skill', actor_id: state.active_actor_id, skill_id: s.id, target_id: allies[0]?.id });
                           } else {
                             setSkillId(s.id);
                             setMode('ally_skill');
@@ -516,7 +532,7 @@ export default function BattlePage() {
                 <div className="space-y-2">
                   <p className="text-sm text-stone-400">Select ally to target:</p>
                   <div className="flex flex-wrap gap-2">
-                    {(hints?.ally_targets || []).map((ally) => (
+                    {(skillTargetEntry(hints, skillId)?.allies || hints?.ally_targets || []).map((ally) => (
                       <button
                         key={ally.id}
                         type="button"
@@ -566,8 +582,10 @@ export default function BattlePage() {
                   {(() => {
                     const skill = myActor?.skills?.find((s) => s.id === skillId);
                     const eff = normalizeEffect(skill?.effect_type);
+                    const targets = skillTargetEntry(hints, skillId);
                     if (eff === 'range') {
-                      return (hints?.skill_range_targets || []).map((tid) => (
+                      const enemyIds = (targets?.enemies as string[] | undefined) || hints?.skill_range_targets || [];
+                      return enemyIds.map((tid) => (
                         <button
                           key={tid}
                           type="button"
@@ -578,7 +596,10 @@ export default function BattlePage() {
                         </button>
                       ));
                     }
-                    return hints?.melee_targets.map((t) => (
+                    const meleeTargets = (targets?.enemies as { id: string; charge_cells: { x: number; y: number }[] }[] | undefined)
+                      || hints?.melee_targets
+                      || [];
+                    return meleeTargets.map((t) => (
                       <button key={t.id} type="button" className="btn-primary mr-2 text-xs" onClick={() => {
                         if (t.charge_cells.length) {
                           setTargetId(t.id);

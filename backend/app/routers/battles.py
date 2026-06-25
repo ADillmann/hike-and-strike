@@ -381,6 +381,7 @@ async def battle_action(
         move_cell=_cell_dict(payload.move_cell),
         guard_cell=_cell_dict(payload.guard_cell),
         inventory_item_id=payload.inventory_item_id,
+        db=db,
     )
     if msg != "ok":
         raise HTTPException(status_code=400, detail=msg)
