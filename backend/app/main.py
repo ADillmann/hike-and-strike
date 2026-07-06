@@ -3,7 +3,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
@@ -26,6 +28,20 @@ from app.routers import (
     websocket,
 )
 from seed import seed_data
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve built frontend; fall back to index.html for client-side routes."""
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and scope["method"] in ("GET", "HEAD"):
+                index_path = Path(self.directory) / "index.html"
+                if index_path.is_file():
+                    return FileResponse(index_path)
+            raise
 
 
 @asynccontextmanager
@@ -77,4 +93,4 @@ app.mount("/uploads", StaticFiles(directory=str(settings.uploads_dir)), name="up
 
 frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=str(frontend_dist), html=True), name="frontend")

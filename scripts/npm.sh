@@ -21,3 +21,10 @@ find_npm() {
 }
 
 find_npm "$@"
+
+# Sourced by play.sh / dev-frontend*.sh — only put npm on PATH.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+exec npm "$@"

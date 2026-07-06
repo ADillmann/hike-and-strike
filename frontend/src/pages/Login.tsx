@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, setToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
@@ -8,7 +8,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [setupMode, setSetupMode] = useState(false);
-  const { login } = useAuth();
+  const { login, refresh } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,9 +21,9 @@ export default function LoginPage() {
     try {
       if (setupMode) {
         const res = await api.post<{ access_token: string; role: string }>('/auth/setup', { username, password });
-        localStorage.setItem('token', res.access_token);
+        setToken(res.access_token);
+        await refresh();
         navigate('/organizer');
-        window.location.reload();
         return;
       }
       const me = await login(username, password);
