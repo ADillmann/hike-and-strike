@@ -90,8 +90,67 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
         ? 'layout-header-knight relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
         : 'border-b border-dungeon-700 bg-dungeon-800 px-4 py-3';
 
+  const shellClass = fantasyPlayer
+    ? 'layout-shell-fantasy'
+    : cyberPlayer
+      ? 'layout-shell-cyberpunk'
+      : knightPlayer
+        ? 'layout-shell-knight'
+        : '';
+
+  const mainFrameClass = fantasyPlayer
+    ? 'layout-main-fantasy'
+    : cyberPlayer
+      ? 'layout-main-cyberpunk'
+      : knightPlayer
+        ? 'layout-main-knight'
+        : '';
+
+  const cornerAccent = cyberPlayer
+    ? 'text-cyan-400'
+    : knightPlayer
+      ? 'text-slate-300'
+      : 'text-dungeon-400';
+
+  const renderMainCorners = () => {
+    if (fantasyPlayer) {
+      return (
+        <>
+          <FrameCorner className={`pointer-events-none absolute left-1 top-1 ${cornerAccent}`} />
+          <FrameCorner className={`pointer-events-none absolute right-1 top-1 ${cornerAccent}`} flipX />
+          <FrameCorner className={`pointer-events-none absolute bottom-1 left-1 ${cornerAccent}`} flipY />
+          <FrameCorner className={`pointer-events-none absolute bottom-1 right-1 ${cornerAccent}`} flipX flipY />
+        </>
+      );
+    }
+    if (cyberPlayer) {
+      return (
+        <>
+          <CyberCorner className={`pointer-events-none absolute left-2 top-2 ${cornerAccent}`} />
+          <CyberCorner className={`pointer-events-none absolute right-2 top-2 ${cornerAccent}`} flipX />
+          <CyberCorner className={`pointer-events-none absolute bottom-2 left-2 ${cornerAccent}`} flipY />
+          <CyberCorner className={`pointer-events-none absolute bottom-2 right-2 ${cornerAccent}`} flipX flipY />
+        </>
+      );
+    }
+    if (knightPlayer) {
+      return (
+        <>
+          <KnightCorner className={`pointer-events-none absolute left-1 top-1 ${cornerAccent}`} />
+          <KnightCorner className={`pointer-events-none absolute right-1 top-1 ${cornerAccent}`} flipX />
+          <KnightCorner className={`pointer-events-none absolute bottom-1 left-1 ${cornerAccent}`} flipY />
+          <KnightCorner className={`pointer-events-none absolute bottom-1 right-1 ${cornerAccent}`} flipX flipY />
+        </>
+      );
+    }
+    return null;
+  };
+
   return (
-    <div className="min-h-screen" data-layout={themedPlayer ? layoutTheme : 'default'}>
+    <div
+      className={`min-h-screen ${shellClass}`.trim()}
+      data-layout={themedPlayer ? layoutTheme : 'default'}
+    >
       <header className={headerClass}>
         {fantasyPlayer && (
           <>
@@ -119,7 +178,14 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
         )}
         {brandAndNav}
       </header>
-      <main className="mx-auto max-w-6xl p-4">{children}</main>
+      {themedPlayer ? (
+        <div className={`relative mx-3 mb-4 mt-2 p-3 sm:mx-4 sm:p-4 ${mainFrameClass}`}>
+          {renderMainCorners()}
+          <main className="relative z-[1] mx-auto max-w-6xl">{children}</main>
+        </div>
+      ) : (
+        <main className="mx-auto max-w-6xl p-4">{children}</main>
+      )}
     </div>
   );
 }
