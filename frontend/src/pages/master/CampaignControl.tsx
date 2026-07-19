@@ -5,6 +5,7 @@ import { Layout } from '../../components/Layout';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
 import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, MAX_BATTLE_GRID, MIN_BATTLE_GRID, normalizeTerrainCells, suggestedGridSize, TerrainCell } from '../../components/BattleGrid';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { DiceBox } from '../../components/DiceBox';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 import { ITEM_TYPE_FILTER_OPTIONS, ItemTypeFilter } from '../../utils/itemTypes';
@@ -305,7 +306,9 @@ export default function CampaignControlPage() {
           rewardsBlocked={!!activeBattleId}
         />
 
-        <section className="card lg:col-span-2">
+        <DiceBox />
+
+        <section className="card">
           <h2 className="mb-2 font-semibold text-dungeon-300">Advance Event</h2>
           <p className="mb-2 text-xs text-stone-500">
             Record how the party resolved <span className="text-dungeon-400">{state.current_node?.event.name || 'the current event'}</span>, then move to the next event.
