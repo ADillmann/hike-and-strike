@@ -22,7 +22,11 @@ class User(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    character: Mapped["Character | None"] = relationship(back_populates="user", uselist=False)
+    character: Mapped["Character | None"] = relationship(
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     created_users: Mapped[list["User"]] = relationship("User", back_populates="creator", foreign_keys=[created_by_id])
     creator: Mapped["User | None"] = relationship("User", back_populates="created_users", remote_side=[id])
     groups: Mapped[list["Group"]] = relationship(back_populates="master")
@@ -35,6 +39,7 @@ class Character(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     name: Mapped[str] = mapped_column(String(128))
     race: Mapped[str] = mapped_column(String(64))
+    class_template_id: Mapped[int | None] = mapped_column(ForeignKey("class_templates.id"), nullable=True)
     portrait_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     stats: Mapped[dict] = mapped_column(JSON, default=dict)
     max_hp: Mapped[int] = mapped_column(Integer, default=10)
@@ -47,11 +52,40 @@ class Character(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="character")
-    group_memberships: Mapped[list["GroupMember"]] = relationship(back_populates="character")
-    inventory_items: Mapped[list["InventoryItem"]] = relationship(back_populates="character")
-    skills: Mapped[list["Skill"]] = relationship(back_populates="character")
-    temporary_effects: Mapped[list["TemporaryEffect"]] = relationship(back_populates="character")
-    stat_changes: Mapped[list["StatChangeLog"]] = relationship(back_populates="character")
+    class_template: Mapped["ClassTemplate | None"] = relationship(back_populates="characters")
+    group_memberships: Mapped[list["GroupMember"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
+    inventory_items: Mapped[list["InventoryItem"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
+    skills: Mapped[list["Skill"]] = relationship(back_populates="character", cascade="all, delete-orphan")
+    temporary_effects: Mapped[list["TemporaryEffect"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
+    stat_changes: Mapped[list["StatChangeLog"]] = relationship(
+        back_populates="character", cascade="all, delete-orphan"
+    )
+
+class ClassTemplate(Base):
+    __tablename__ = "class_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(Text, default="")
+    base_stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    characters: Mapped[list["Character"]] = relationship(back_populates="class_template")
+
+
+class GameSetting(Base):
+    __tablename__ = "game_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
 
 
 class StatChangeLog(Base):
@@ -266,6 +300,7 @@ class Skill(Base):
     name: Mapped[str] = mapped_column(String(64))
     max_uses_per_rest: Mapped[int] = mapped_column(Integer, default=1)
     uses_remaining: Mapped[int] = mapped_column(Integer, default=1)
+    slot_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     character: Mapped["Character"] = relationship(back_populates="skills")
     skill_template: Mapped["SkillTemplate | None"] = relationship(back_populates="character_skills")

@@ -26,7 +26,21 @@ def _character(db, name="Hero"):
     user = User(username=f"user_{name}", password_hash="x", role=UserRole.player)
     db.add(user)
     db.flush()
-    character = Character(user_id=user.id, name=name, race="Human", stats={}, max_hp=20, current_hp=10)
+    character = Character(
+        user_id=user.id,
+        name=name,
+        race="Human",
+        stats={
+            "strength": 15,
+            "dexterity": 15,
+            "intelligence": 20,
+            "durability": 10,
+            "charisma": 20,
+            "initiative": 10,
+        },
+        max_hp=20,
+        current_hp=10,
+    )
     db.add(character)
     db.flush()
     return character
@@ -64,7 +78,7 @@ def _inventory(db, character_id, item_template_id):
 
 def _add_skills(db, character_id, count, prefix="Skill"):
     for i in range(count):
-        st = SkillTemplate(name=f"{prefix}{i}", max_uses_per_rest=1)
+        st = SkillTemplate(name=f"{prefix}{i}", max_uses_per_rest=1, effect_type="none")
         db.add(st)
         db.flush()
         db.add(
@@ -74,6 +88,7 @@ def _add_skills(db, character_id, count, prefix="Skill"):
                 name=st.name,
                 max_uses_per_rest=1,
                 uses_remaining=1,
+                slot_kind="support",
             )
         )
     db.flush()
@@ -82,21 +97,22 @@ def _add_skills(db, character_id, count, prefix="Skill"):
 def test_learn_skill_from_scroll_adds_skill(db):
     character = _character(db)
     skill = _skill_template(db, "Arcane Bolt")
-    _learn_skill_from_scroll(db, character, skill.id, None)
+    _learn_skill_from_scroll(db, character, skill.id, None, None)
     db.commit()
     learned = db.query(Skill).filter(Skill.character_id == character.id).all()
     assert len(learned) == 1
     assert learned[0].skill_template_id == skill.id
     assert learned[0].name == "Arcane Bolt"
+    assert learned[0].slot_kind == "range"
 
 
 def test_learn_skill_from_scroll_rejects_duplicate(db):
     character = _character(db)
     skill = _skill_template(db)
-    _learn_skill_from_scroll(db, character, skill.id, None)
+    _learn_skill_from_scroll(db, character, skill.id, None, None)
     db.commit()
     with pytest.raises(HTTPException) as exc:
-        _learn_skill_from_scroll(db, character, skill.id, None)
+        _learn_skill_from_scroll(db, character, skill.id, None, None)
     assert exc.value.status_code == 400
     assert exc.value.detail == "You already know this spell"
     assert db.query(Skill).filter(Skill.character_id == character.id).count() == 1
@@ -107,7 +123,7 @@ def test_learn_skill_from_scroll_requires_replacement_at_cap(db):
     _add_skills(db, character.id, MAX_CHARACTER_SKILLS)
     new_skill = _skill_template(db, "New Spell")
     with pytest.raises(HTTPException) as exc:
-        _learn_skill_from_scroll(db, character, new_skill.id, None)
+        _learn_skill_from_scroll(db, character, new_skill.id, None, None)
     assert exc.value.status_code == 409
     detail = exc.value.detail
     assert detail["code"] == "skill_cap_reached"
@@ -120,7 +136,7 @@ def test_learn_skill_from_scroll_replaces_skill_at_cap(db):
     _add_skills(db, character.id, MAX_CHARACTER_SKILLS)
     old_skill = db.query(Skill).filter(Skill.character_id == character.id).first()
     new_skill = _skill_template(db, "Replacement")
-    _learn_skill_from_scroll(db, character, new_skill.id, old_skill.id)
+    _learn_skill_from_scroll(db, character, new_skill.id, old_skill.id, None)
     db.commit()
     skills = db.query(Skill).filter(Skill.character_id == character.id).all()
     assert len(skills) == MAX_CHARACTER_SKILLS
@@ -166,7 +182,7 @@ def test_scroll_use_heals_and_learns(db):
     if isinstance(heal, int) and heal > 0:
         character.current_hp = min(character.max_hp, character.current_hp + heal)
     if scroll.skill_template_id:
-        _learn_skill_from_scroll(db, character, scroll.skill_template_id, None)
+        _learn_skill_from_scroll(db, character, scroll.skill_template_id, None, None)
     db.delete(inv)
     db.commit()
 
@@ -178,12 +194,12 @@ def test_scroll_use_heals_and_learns(db):
 def test_duplicate_scroll_does_not_consume_inventory(db):
     character = _character(db)
     skill = _skill_template(db, "Known")
-    _learn_skill_from_scroll(db, character, skill.id, None)
+    _learn_skill_from_scroll(db, character, skill.id, None, None)
     db.commit()
     scroll = _scroll(db, skill.id)
     inv = _inventory(db, character.id, scroll.id)
 
     with pytest.raises(HTTPException):
-        _learn_skill_from_scroll(db, character, scroll.skill_template_id, None)
+        _learn_skill_from_scroll(db, character, scroll.skill_template_id, None, None)
 
     assert db.get(InventoryItem, inv.id) is not None

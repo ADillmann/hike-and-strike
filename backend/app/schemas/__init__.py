@@ -80,6 +80,7 @@ class SkillTemplateOut(BaseModel):
 
 class AssignSkillRequest(BaseModel):
     skill_template_id: int
+    slot_kind: str | None = None
 
 
 class EffectTemplateCreate(BaseModel):
@@ -111,10 +112,18 @@ class EffectTemplateOut(BaseModel):
         from_attributes = True
 
 
+class StarterSkillPick(BaseModel):
+    skill_template_id: int
+    slot_kind: str | None = None
+
+
 class CharacterCreate(BaseModel):
     name: str
-    race: str
+    class_template_id: int
     stats: StatsDict
+    starter_skills: list[StarterSkillPick] = Field(default_factory=list)
+    # Legacy fields kept for older clients
+    race: str | None = None
     skills: list[SkillCreate] = Field(default_factory=list)
     skill_template_ids: list[int] = Field(default_factory=list)
 
@@ -124,6 +133,7 @@ class CharacterOut(BaseModel):
     user_id: int
     name: str
     race: str
+    class_template_id: int | None = None
     portrait_path: str | None
     stats: dict[str, int]
     max_hp: int
@@ -144,9 +154,35 @@ class CharacterOut(BaseModel):
     temporary_effects: list[dict[str, Any]] = []
     item_effects: list[dict[str, Any]] = []
     in_active_battle: bool = False
+    skill_slots: dict[str, dict[str, int]] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True
+
+
+class ClassTemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    base_stats: StatsDict = Field(default_factory=StatsDict)
+
+
+class ClassTemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    base_stats: dict[str, int]
+    is_system: bool
+
+    class Config:
+        from_attributes = True
+
+
+class CreationSettingsOut(BaseModel):
+    creation_bonus_points: int
+
+
+class CreationSettingsUpdate(BaseModel):
+    creation_bonus_points: int
 
 
 class AllocateStatRequest(BaseModel):
@@ -410,6 +446,7 @@ class GiveItemRequest(BaseModel):
 class UseItemRequest(BaseModel):
     inventory_item_id: int
     replace_skill_id: int | None = None
+    slot_kind: str | None = None
 
 
 class UseSkillRequest(BaseModel):

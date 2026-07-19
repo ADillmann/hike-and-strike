@@ -131,10 +131,39 @@ async def shop_sell_item(
 
 
 @router.get("/races")
-def list_races() -> list[str]:
+def list_races(db: Annotated[Session, Depends(get_db)]) -> list[str]:
+    from app.models import ClassTemplate
+
+    names = [c.name for c in db.query(ClassTemplate).order_by(ClassTemplate.name).all()]
+    if names:
+        return names
     from app.game.constants import RACES
 
     return RACES
+
+
+@router.get("/classes")
+def list_player_classes(db: Annotated[Session, Depends(get_db)]) -> list[dict]:
+    from app.models import ClassTemplate
+    from app.services.character_stats import normalize_base_stats
+
+    rows = db.query(ClassTemplate).order_by(ClassTemplate.name).all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "description": c.description or "",
+            "base_stats": normalize_base_stats(c.base_stats),
+        }
+        for c in rows
+    ]
+
+
+@router.get("/creation-settings")
+def player_creation_settings(db: Annotated[Session, Depends(get_db)]) -> dict:
+    from app.services.creation_settings import get_creation_bonus_points
+
+    return {"creation_bonus_points": get_creation_bonus_points(db)}
 
 
 @router.get("/starter-skills")

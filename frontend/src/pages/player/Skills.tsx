@@ -70,9 +70,19 @@ export default function SkillsPage() {
 
   if (!character) return <Layout title="Skills">Loading...</Layout>;
 
+  const slotLine = character.skill_slots
+    ? `Melee ${character.skill_slots.melee?.used ?? 0}/${character.skill_slots.melee?.max ?? 0} · Range ${character.skill_slots.range?.used ?? 0}/${character.skill_slots.range?.max ?? 0} · Support ${character.skill_slots.support?.used ?? 0}/${character.skill_slots.support?.max ?? 0}`
+    : null;
+
   return (
     <Layout title="Skills">
       {error && <p className="mb-3 text-red-400">{error}</p>}
+      {slotLine && (
+        <p className="mb-3 text-sm text-dungeon-300">
+          Skill slots: {slotLine}
+          <span className="ml-2 text-xs text-stone-500">(heal uses range or support)</span>
+        </p>
+      )}
       <div className="card space-y-3">
         {character.skills.length === 0 && (
           <p className="text-stone-500">No skills yet.</p>
@@ -85,6 +95,10 @@ export default function SkillsPage() {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="font-medium">{skill.name}</div>
+                  <p className="text-xs capitalize text-stone-500">
+                    {normalizeEffect(skill.effect_type)}
+                    {skill.slot_kind ? ` · ${skill.slot_kind} slot` : ''}
+                  </p>
                   {skill.description && <p className="mt-1 text-sm text-stone-500">{skill.description}</p>}
                   <p className="mt-1 text-xs text-stone-500">{useSkillHint(skill)}</p>
                 </div>
@@ -105,7 +119,7 @@ export default function SkillsPage() {
             </div>
           );
         })}
-        <p className="text-sm text-stone-500">Uses refill after rest at bonfire or house events.</p>
+        <p className="text-sm text-stone-500">Uses refill after rest at bonfire or house events. New slots appear when STR/DEX/INT/CHA rise.</p>
       </div>
 
       {pendingSkill && (

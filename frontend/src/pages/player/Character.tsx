@@ -1,61 +1,182 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../api/client';
+import { api, type ClassTemplate } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout, StatBadge } from '../../components/Layout';
 import type { Character } from '../../api/client';
 import { formatBattleMods, formatStatMods } from '../../utils/effects';
+import {
+  allowedSlotsForEffect,
+  canAddResolved,
+  formatSlotSummary,
+  needsSlotChoice,
+  normalizeEffectType,
+  resolveSlot,
+  type SlotKind,
+} from '../../utils/skillSlots';
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
 const DEFAULT_STATS = Object.fromEntries(STAT_NAMES.map((s) => [s, 8]));
-const MAX_SKILLS = 3;
+const MAX_STARTER_SKILLS = 2;
+const STAT_CAP_CREATE = 15;
 
 interface StarterSkill {
   id: number;
   name: string;
   max_uses_per_rest: number;
   description: string;
+  effect_type: string;
 }
 
+type StarterPick = { skillId: number; slotKind: SlotKind };
+
 export default function CharacterCreatePage() {
-  const [races, setRaces] = useState<string[]>([]);
+  const [classes, setClasses] = useState<ClassTemplate[]>([]);
+  const [bonusPool, setBonusPool] = useState(27);
   const [starterSkills, setStarterSkills] = useState<StarterSkill[]>([]);
   const [name, setName] = useState('');
-  const [race, setRace] = useState('Human');
+  const [classId, setClassId] = useState<number | null>(null);
+  const [baseStats, setBaseStats] = useState<Record<string, number>>(DEFAULT_STATS);
   const [stats, setStats] = useState<Record<string, number>>(DEFAULT_STATS);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<number[]>([]);
+  const [picks, setPicks] = useState<StarterPick[]>([]);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get<string[]>('/player/races').then((r) => { setRaces(r); setRace(r[0] || 'Human'); });
-    api.get<StarterSkill[]>('/player/starter-skills').then(setStarterSkills);
+    Promise.all([
+      api.get<ClassTemplate[]>('/player/classes'),
+      api.get<{ creation_bonus_points: number }>('/player/creation-settings'),
+      api.get<StarterSkill[]>('/player/starter-skills'),
+    ]).then(([cls, settings, skills]) => {
+      setClasses(cls);
+      setBonusPool(settings.creation_bonus_points);
+      setStarterSkills(skills);
+      if (cls[0]) {
+        setClassId(cls[0].id);
+        const bases = { ...DEFAULT_STATS, ...cls[0].base_stats };
+        setBaseStats(bases);
+        setStats(bases);
+      }
+    });
   }, []);
 
-  const pointCost = (v: number) => (v <= 13 ? v - 8 : v - 8 + (v - 13));
-  const totalPoints = STAT_NAMES.reduce((sum, s) => sum + pointCost(stats[s] || 8), 0);
+  const selectedClass = classes.find((c) => c.id === classId) || null;
 
-  const adjust = (stat: string, delta: number) => {
-    const next = Math.min(15, Math.max(8, (stats[stat] || 8) + delta));
-    setStats({ ...stats, [stat]: next });
+  const pointCost = (v: number) => (v <= 13 ? v - 8 : v - 8 + (v - 13));
+  const bonusSpent = STAT_NAMES.reduce(
+    (sum, s) => sum + (pointCost(stats[s] || 8) - pointCost(baseStats[s] || 8)),
+    0,
+  );
+
+  const selectedKinds = useMemo(() => picks.map((p) => p.slotKind), [picks]);
+  const slotLine = formatSlotSummary(stats, selectedKinds);
+
+  const onClassChange = (id: number) => {
+    setClassId(id);
+    const cls = classes.find((c) => c.id === id);
+    if (!cls) return;
+    const bases = { ...DEFAULT_STATS, ...cls.base_stats };
+    setBaseStats(bases);
+    setStats(bases);
+    setPicks([]);
   };
 
-  const toggleSkill = (skillId: number) => {
-    setSelectedSkillIds((prev) => {
-      if (prev.includes(skillId)) return prev.filter((s) => s !== skillId);
-      if (prev.length >= MAX_SKILLS) return prev;
-      return [...prev, skillId];
+  const adjust = (stat: string, delta: number) => {
+    const floor = baseStats[stat] || 8;
+    const next = Math.min(STAT_CAP_CREATE, Math.max(floor, (stats[stat] || 8) + delta));
+    const candidate = { ...stats, [stat]: next };
+    const spent = STAT_NAMES.reduce(
+      (sum, s) => sum + (pointCost(candidate[s] || 8) - pointCost(baseStats[s] || 8)),
+      0,
+    );
+    if (spent > bonusPool) return;
+    setStats(candidate);
+    setPicks((prev) => {
+      const kept: StarterPick[] = [];
+      for (const pick of prev) {
+        if (canAddResolved(candidate, kept.map((p) => p.slotKind), pick.slotKind)) {
+          kept.push(pick);
+        }
+      }
+      return kept;
     });
+  };
+
+  /** Fixed-type skills only (melee/range/support). Heal/none use setFlexibleSlot. */
+  const toggleFixedSkill = (skill: StarterSkill) => {
+    const already = picks.some((p) => p.skillId === skill.id);
+    if (already) {
+      setPicks((prev) => prev.filter((p) => p.skillId !== skill.id));
+      return;
+    }
+    if (needsSlotChoice(skill.effect_type)) {
+      setError(`Use the Melee / Range / Support buttons to pick a slot for ${skill.name}`);
+      return;
+    }
+    if (picks.length >= MAX_STARTER_SKILLS) return;
+    let slot: SlotKind | null = null;
+    try {
+      slot = resolveSlot(skill.effect_type, null);
+    } catch {
+      slot = null;
+    }
+    const otherKinds = picks.map((p) => p.slotKind);
+    if (!slot || !canAddResolved(stats, otherKinds, slot)) {
+      setError('No free skill slot for that pick — raise the matching stats or pick a different skill');
+      return;
+    }
+    setError('');
+    setPicks((prev) => [...prev, { skillId: skill.id, slotKind: slot }]);
+  };
+
+  /** Heal / passive: choosing a slot is what selects the skill. */
+  const setFlexibleSlot = (skill: StarterSkill, slot: SlotKind) => {
+    const without = picks.filter((p) => p.skillId !== skill.id);
+    if (!canAddResolved(stats, without.map((p) => p.slotKind), slot)) {
+      setError(`No free ${slot} slot`);
+      return;
+    }
+    const already = picks.some((p) => p.skillId === skill.id);
+    if (!already && without.length >= MAX_STARTER_SKILLS) {
+      setError(`Pick exactly ${MAX_STARTER_SKILLS} skills — clear one first`);
+      return;
+    }
+    setError('');
+    setPicks([...without, { skillId: skill.id, slotKind: slot }]);
+  };
+
+  const clearPick = (skillId: number) => {
+    setPicks((prev) => prev.filter((p) => p.skillId !== skillId));
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (totalPoints > 27) { setError('Too many points spent'); return; }
-    if (selectedSkillIds.length < 1) { setError('Pick at least 1 skill'); return; }
+    if (!classId) { setError('Pick a class'); return; }
+    if (bonusSpent > bonusPool) { setError('Too many bonus points spent'); return; }
+    if (picks.length !== MAX_STARTER_SKILLS) {
+      setError(`Pick exactly ${MAX_STARTER_SKILLS} starter skills`);
+      return;
+    }
+    for (const pick of picks) {
+      if (pick.slotKind !== 'melee' && pick.slotKind !== 'range' && pick.slotKind !== 'support') {
+        const skill = starterSkills.find((s) => s.id === pick.skillId);
+        setError(`Choose a skill slot for ${skill?.name ?? 'skill'} (range or support)`);
+        return;
+      }
+    }
+    const starter_skills = picks.map((p) => ({
+      skill_template_id: p.skillId,
+      slot_kind: p.slotKind as string,
+    }));
     try {
-      await api.post('/characters', { name, race, stats, skill_template_ids: selectedSkillIds });
+      await api.post('/characters', {
+        name,
+        class_template_id: classId,
+        stats,
+        starter_skills,
+      });
       navigate('/character');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -72,15 +193,25 @@ export default function CharacterCreatePage() {
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
         </div>
         <div>
-          <label className="label">Race</label>
-          <select className="input" value={race} onChange={(e) => setRace(e.target.value)}>
-            {races.map((r) => <option key={r} value={r}>{r}</option>)}
+          <label className="label">Class</label>
+          <select
+            className="input"
+            value={classId ?? ''}
+            onChange={(e) => onClassChange(Number(e.target.value))}
+            required
+          >
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
           </select>
+          {selectedClass?.description && (
+            <p className="mt-1 text-sm text-stone-400">{selectedClass.description}</p>
+          )}
         </div>
         <div>
           <div className="mb-2 flex justify-between">
             <span className="label mb-0">Attributes</span>
-            <span className="text-sm text-stone-400">Points: {totalPoints}/27</span>
+            <span className="text-sm text-stone-400">Bonus: {bonusSpent}/{bonusPool}</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {STAT_NAMES.map((s) => (
@@ -92,29 +223,115 @@ export default function CharacterCreatePage() {
               </div>
             ))}
           </div>
+          <p className="mt-2 text-xs text-stone-500">Class floors cannot be lowered. Cap at creation: {STAT_CAP_CREATE}.</p>
+        </div>
+        <div>
+          <div className="mb-1 flex justify-between">
+            <span className="label mb-0">Skill slots</span>
+            <span className="text-sm text-stone-400">{slotLine}</span>
+          </div>
+          <p className="text-xs text-stone-500">
+            Melee slots (STR/DEX) are melee skills only. Heal / passives use range (INT) or support (CHA).
+          </p>
         </div>
         <div>
           <div className="mb-2 flex justify-between">
-            <span className="label mb-0">Skills</span>
-            <span className="text-sm text-stone-400">{selectedSkillIds.length}/{MAX_SKILLS}</span>
+            <span className="label mb-0">Starter skills</span>
+            <span className="text-sm text-stone-400">{picks.length}/{MAX_STARTER_SKILLS}</span>
           </div>
-          <div className="space-y-1">
-            {starterSkills.map((s) => (
-              <label key={s.id} className="flex items-start gap-2 rounded border border-dungeon-600 p-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={selectedSkillIds.includes(s.id)}
-                  onChange={() => toggleSkill(s.id)}
-                  disabled={!selectedSkillIds.includes(s.id) && selectedSkillIds.length >= MAX_SKILLS}
-                />
-                <div>
-                  <span>{s.name}</span>
-                  <span className="ml-1 text-xs text-stone-500">({s.max_uses_per_rest}/rest)</span>
-                  {s.description && <p className="text-xs text-stone-500">{s.description}</p>}
+          <div className="space-y-2">
+            {starterSkills.map((s) => {
+              const selected = picks.some((p) => p.skillId === s.id);
+              const flexible = needsSlotChoice(s.effect_type);
+              const chosenSlot = picks.find((p) => p.skillId === s.id)?.slotKind ?? null;
+              const otherKinds = picks.filter((p) => p.skillId !== s.id).map((p) => p.slotKind);
+              let fixedSlot: SlotKind | null = null;
+              if (!flexible) {
+                try {
+                  fixedSlot = resolveSlot(s.effect_type, null);
+                } catch {
+                  fixedSlot = null;
+                }
+              }
+              const flexibleSlots = flexible ? allowedSlotsForEffect(s.effect_type) : [];
+              const anySlotFree = flexible
+                ? flexibleSlots.some((slot) => canAddResolved(stats, otherKinds, slot))
+                : fixedSlot != null && canAddResolved(stats, otherKinds, fixedSlot);
+              const atCap = !selected && picks.length >= MAX_STARTER_SKILLS;
+              const rowDisabled = atCap || (!selected && !anySlotFree);
+              return (
+                <div
+                  key={s.id}
+                  className={`rounded border p-3 ${
+                    selected ? 'border-dungeon-400 bg-dungeon-800/40' : 'border-dungeon-600'
+                  } ${rowDisabled ? 'opacity-50' : ''}`}
+                >
+                  <div className="flex items-start gap-2">
+                    {!flexible && (
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={selected}
+                        onChange={() => toggleFixedSkill(s)}
+                        disabled={rowDisabled && !selected}
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-medium">{s.name}</span>
+                        <span className="text-xs text-stone-500">
+                          {normalizeEffectType(s.effect_type)} · {s.max_uses_per_rest}/rest
+                        </span>
+                      </div>
+                      {s.description && <p className="mt-0.5 text-xs text-stone-500">{s.description}</p>}
+                      {!flexible && fixedSlot && (
+                        <p className="mt-1 text-xs text-dungeon-300">Uses {fixedSlot} slot</p>
+                      )}
+                      {flexible && (
+                        <div className="mt-3 rounded border border-dashed border-dungeon-500 bg-dungeon-900/50 p-2">
+                          <p className="mb-2 text-xs font-medium text-dungeon-200">
+                            {selected
+                              ? `Selected — in ${chosenSlot} slot`
+                              : 'Choose range or support:'}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {flexibleSlots.map((slot) => {
+                              const slotFits = canAddResolved(stats, otherKinds, slot);
+                              const canSelect = slotFits && (!atCap || selected);
+                              return (
+                                <button
+                                  key={slot}
+                                  type="button"
+                                  className={`btn-secondary capitalize ${
+                                    chosenSlot === slot ? 'ring-2 ring-dungeon-300' : ''
+                                  }`}
+                                  disabled={!canSelect}
+                                  onClick={() => setFlexibleSlot(s, slot)}
+                                >
+                                  {slot}
+                                </button>
+                              );
+                            })}
+                            {selected && (
+                              <button
+                                type="button"
+                                className="btn-secondary text-xs"
+                                onClick={() => clearPick(s.id)}
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {!anySlotFree && !selected && (
+                        <p className="mt-1 text-xs text-red-400">No free slot — raise STR/DEX/INT/CHA</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </label>
-            ))}
+              );
+            })}
           </div>
         </div>
         <button className="btn-primary w-full" type="submit">Create Character</button>
@@ -167,7 +384,7 @@ export function CharacterSheetPage() {
           </div>
           <div>
             <h2 className="text-2xl font-bold text-dungeon-300">{character.name}</h2>
-            <p className="text-stone-400">{character.race}</p>
+            <p className="text-stone-400">Class: {character.race}</p>
             <p className="mt-1">
               Level {character.level ?? 1} — XP {character.xp ?? 0} / {character.xp_to_next_level ?? 100}
             </p>

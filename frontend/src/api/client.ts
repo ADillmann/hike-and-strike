@@ -19,7 +19,7 @@ export interface SkillCapErrorDetail {
   code: 'skill_cap_reached';
   message: string;
   skills: { id: number; name: string; skill_template_id: number | null }[];
-  skill_to_learn: { skill_template_id: number; name: string };
+  skill_to_learn: { skill_template_id: number; name: string; effect_type?: string };
 }
 
 export function isSkillCapError(detail: unknown): detail is SkillCapErrorDetail {
@@ -97,6 +97,7 @@ export interface Character {
   id: number;
   name: string;
   race: string;
+  class_template_id?: number | null;
   portrait_path?: string;
   stats: Record<string, number>;
   max_hp: number;
@@ -113,6 +114,7 @@ export interface Character {
   effective_stats?: Record<string, number>;
   attack_bonus?: number;
   username?: string;
+  skill_slots?: Record<string, { used: number; max: number }>;
   skills: {
     id: number;
     skill_template_id?: number | null;
@@ -122,6 +124,7 @@ export interface Character {
     effect_type?: string;
     description?: string;
     effect_params?: Record<string, string | number>;
+    slot_kind?: string | null;
   }[];
   inventory: {
     id: number;
@@ -145,6 +148,7 @@ export interface Character {
     secret_solver_hints?: Record<string, unknown>;
     skill_template_id?: number | null;
     teaches_skill_name?: string | null;
+    teaches_skill_effect_type?: string | null;
   }[];
   temporary_effects: {
     id: number;
@@ -162,4 +166,12 @@ export interface Character {
     battle_modifiers?: Record<string, number>;
     active_in_battle?: boolean;
   }[];
+}
+
+export interface ClassTemplate {
+  id: number;
+  name: string;
+  description: string;
+  base_stats: Record<string, number>;
+  is_system?: boolean;
 }

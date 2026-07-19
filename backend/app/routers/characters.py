@@ -11,6 +11,7 @@ from app.database import get_db
 from app.game.constants import EQUIP_SLOTS, HAND_SLOTS, MAX_CHARACTER_SKILLS, STAT_CAP, STAT_NAMES
 from app.models import (
     Character,
+    ClassTemplate,
     GroupMember,
     InventoryItem,
     ItemTemplate,
@@ -62,31 +63,91 @@ from app.services.character_stats import (
     is_bag_only_item,
     is_equippable,
     is_two_handed_weapon,
+    normalize_base_stats,
     normalize_equipped_slot,
     serialize_item_effects,
     slot_label,
     stacks_in_inventory,
-    validate_point_buy,
+    validate_class_point_buy,
     weapon_attack_bonus,
     weapon_class,
+)
+from app.services.creation_settings import get_creation_bonus_points
+from app.services.skill_slots import (
+    can_add_resolved,
+    default_slot_for_backfill,
+    resolve_slot,
+    slot_full_message,
+    slot_summary,
 )
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
 
-def _add_skill_templates(db: Session, character_id: int, template_ids: list[int]) -> None:
-    for template_id in template_ids:
-        template = db.get(SkillTemplate, template_id)
-        if not template:
-            raise HTTPException(status_code=400, detail=f"Unknown skill template {template_id}")
-        existing = (
-            db.query(Skill)
-            .filter(Skill.character_id == character_id, Skill.skill_template_id == template_id)
-            .first()
-        )
-        if existing:
+def _skill_slot_kinds_for_character(
+    db: Session,
+    character_id: int,
+    *,
+    exclude_skill_id: int | None = None,
+) -> list[str]:
+    skills = (
+        db.query(Skill)
+        .options(joinedload(Skill.skill_template))
+        .filter(Skill.character_id == character_id)
+        .all()
+    )
+    kinds: list[str] = []
+    for skill in skills:
+        if exclude_skill_id is not None and skill.id == exclude_skill_id:
             continue
-        db.add(skill_from_template(character_id, template))
+        if skill.slot_kind:
+            kinds.append(skill.slot_kind)
+            continue
+        effect = skill_battle_meta(skill).get("effect_type") or "none"
+        kinds.append(default_slot_for_backfill(effect))
+    return kinds
+
+
+def _resolve_and_require_slot(
+    db: Session,
+    character: Character,
+    template: SkillTemplate,
+    chosen_slot: str | None,
+    *,
+    exclude_skill_id: int | None = None,
+) -> str:
+    try:
+        slot_kind = resolve_slot(template.effect_type, chosen_slot)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    owned = _skill_slot_kinds_for_character(db, character.id, exclude_skill_id=exclude_skill_id)
+    if not can_add_resolved(character.stats or {}, owned, slot_kind):
+        raise HTTPException(status_code=400, detail=slot_full_message(slot_kind))
+    return slot_kind
+
+
+def _add_skill_template(
+    db: Session,
+    character_id: int,
+    template_id: int,
+    slot_kind: str | None = None,
+) -> None:
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(status_code=404, detail="Character not found")
+    template = db.get(SkillTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=400, detail=f"Unknown skill template {template_id}")
+    existing = (
+        db.query(Skill)
+        .filter(Skill.character_id == character_id, Skill.skill_template_id == template_id)
+        .first()
+    )
+    if existing:
+        return
+    resolved = _resolve_and_require_slot(db, character, template, slot_kind)
+    db.add(skill_from_template(character_id, template, resolved))
+    db.flush()
 
 
 def _learn_skill_from_scroll(
@@ -94,6 +155,7 @@ def _learn_skill_from_scroll(
     character: Character,
     skill_template_id: int,
     replace_skill_id: int | None,
+    slot_kind: str | None = None,
 ) -> None:
     template = db.get(SkillTemplate, skill_template_id)
     if not template:
@@ -108,6 +170,7 @@ def _learn_skill_from_scroll(
         raise HTTPException(status_code=400, detail="You already know this spell")
 
     skill_count = db.query(Skill).filter(Skill.character_id == character.id).count()
+    exclude_id: int | None = None
     if skill_count >= MAX_CHARACTER_SKILLS:
         if replace_skill_id is None:
             skills = (
@@ -132,15 +195,21 @@ def _learn_skill_from_scroll(
                     "skill_to_learn": {
                         "skill_template_id": template.id,
                         "name": template.name,
+                        "effect_type": template.effect_type,
                     },
                 },
             )
         skill_to_replace = db.get(Skill, replace_skill_id)
         if not skill_to_replace or skill_to_replace.character_id != character.id:
             raise HTTPException(status_code=404, detail="Skill to replace not found")
+        exclude_id = skill_to_replace.id
         db.delete(skill_to_replace)
+        db.flush()
 
-    db.add(skill_from_template(character.id, template))
+    resolved = _resolve_and_require_slot(
+        db, character, template, slot_kind, exclude_skill_id=exclude_id
+    )
+    db.add(skill_from_template(character.id, template, resolved))
 
 
 def _serialize_inventory_item(inv: InventoryItem, db: Session) -> dict[str, Any]:
@@ -175,6 +244,8 @@ def _serialize_inventory_item(inv: InventoryItem, db: Session) -> dict[str, Any]
         teaches = template.skill_template.name if template.skill_template else None
         if teaches:
             entry["teaches_skill_name"] = teaches
+        if template.skill_template:
+            entry["teaches_skill_effect_type"] = template.skill_template.effect_type
     if is_secret:
         entry.update(secret_inventory_payload(inv, secret))
     return entry
@@ -203,11 +274,22 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
     prog = progression_fields(character)
     settings = get_system_currency_settings(db)
     wallet_copper = character.wallet_copper or 0
+    effect_types = [
+        (skill_battle_meta(s).get("effect_type") or "none")
+        for s in character.skills
+    ]
+    slot_kinds = []
+    for s in character.skills:
+        if s.slot_kind:
+            slot_kinds.append(s.slot_kind)
+        else:
+            slot_kinds.append(default_slot_for_backfill(skill_battle_meta(s).get("effect_type") or "none"))
     return CharacterOut(
         id=character.id,
         user_id=character.user_id,
         name=character.name,
         race=character.race,
+        class_template_id=character.class_template_id,
         portrait_path=character.portrait_path,
         stats=character.stats,
         max_hp=character.max_hp,
@@ -224,6 +306,8 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
                 "name": s.name,
                 "uses_remaining": s.uses_remaining,
                 "max_uses_per_rest": s.max_uses_per_rest,
+                "slot_kind": s.slot_kind
+                or default_slot_for_backfill(skill_battle_meta(s).get("effect_type") or "none"),
                 **skill_battle_meta(s),
             }
             for s in character.skills
@@ -243,6 +327,7 @@ def _serialize_character(db: Session, character: Character) -> CharacterOut:
         ],
         item_effects=serialize_item_effects(db, character.inventory_items),
         in_active_battle=character_in_active_battle(db, character.id),
+        skill_slots=slot_summary(character.stats or {}, slot_kinds),
     )
 
 
@@ -265,48 +350,66 @@ def create_character(
         raise HTTPException(status_code=400, detail="Only players create characters")
     if db.query(Character).filter(Character.user_id == user.id).first():
         raise HTTPException(status_code=400, detail="Character already exists")
+
+    class_template = db.get(ClassTemplate, payload.class_template_id)
+    if not class_template:
+        raise HTTPException(status_code=400, detail="Unknown class")
+
+    base_stats = normalize_base_stats(class_template.base_stats)
     stats = payload.stats.model_dump()
+    bonus_pool = get_creation_bonus_points(db)
     try:
-        validate_point_buy(stats)
+        validate_class_point_buy(base_stats, stats, bonus_pool)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from app.schemas import StarterSkillPick
+
+    if payload.starter_skills:
+        picks = list(payload.starter_skills)
+    elif payload.skill_template_ids:
+        picks = [StarterSkillPick(skill_template_id=sid) for sid in payload.skill_template_ids]
+    else:
+        picks = []
+
+    if len(picks) != 2:
+        raise HTTPException(status_code=400, detail="Choose exactly 2 starter skills")
+    skill_ids = [p.skill_template_id for p in picks]
+    if len(set(skill_ids)) != 2:
+        raise HTTPException(status_code=400, detail="Starter skills must be unique")
+
+    resolved_pairs: list[tuple[SkillTemplate, str]] = []
+    resolved_kinds: list[str] = []
+    for pick in picks:
+        template = db.get(SkillTemplate, pick.skill_template_id)
+        if not template or not template.selectable_at_creation:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid starter skill {pick.skill_template_id}",
+            )
+        try:
+            slot = resolve_slot(template.effect_type, pick.slot_kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not can_add_resolved(stats, resolved_kinds, slot):
+            raise HTTPException(status_code=400, detail=slot_full_message(slot))
+        resolved_kinds.append(slot)
+        resolved_pairs.append((template, slot))
+
     max_hp = 10 + stats.get("durability", 8) * 5
     character = Character(
         user_id=user.id,
         name=payload.name,
-        race=payload.race,
+        race=class_template.name,
+        class_template_id=class_template.id,
         stats=stats,
         max_hp=max_hp,
         current_hp=max_hp,
     )
     db.add(character)
     db.flush()
-    if payload.skill_template_ids:
-        _add_skill_templates(db, character.id, payload.skill_template_ids)
-    elif payload.skills:
-        for sk in payload.skills:
-            template = db.query(SkillTemplate).filter(SkillTemplate.name == sk.name).first()
-            if template:
-                db.add(skill_from_template(character.id, template))
-            else:
-                db.add(
-                    Skill(
-                        character_id=character.id,
-                        name=sk.name,
-                        max_uses_per_rest=sk.max_uses_per_rest,
-                        uses_remaining=sk.max_uses_per_rest,
-                    )
-                )
-    else:
-        defaults = (
-            db.query(SkillTemplate)
-            .filter(SkillTemplate.selectable_at_creation == True)  # noqa: E712
-            .order_by(SkillTemplate.name)
-            .limit(2)
-            .all()
-        )
-        for template in defaults:
-            db.add(skill_from_template(character.id, template))
+    for template, slot in resolved_pairs:
+        db.add(skill_from_template(character.id, template, slot))
     db.commit()
     return _serialize_character(db, character)
 
@@ -321,7 +424,7 @@ def assign_skill(
     character = db.get(Character, character_id)
     if not character:
         raise HTTPException(status_code=404, detail="Character not found")
-    _add_skill_templates(db, character.id, [payload.skill_template_id])
+    _add_skill_template(db, character.id, payload.skill_template_id, payload.slot_kind)
     db.commit()
     return _serialize_character(db, character)
 
@@ -744,7 +847,13 @@ async def use_item(
         character.current_hp = min(character.max_hp, character.current_hp + heal)
 
     if template.skill_template_id:
-        _learn_skill_from_scroll(db, character, template.skill_template_id, payload.replace_skill_id)
+        _learn_skill_from_scroll(
+            db,
+            character,
+            template.skill_template_id,
+            payload.replace_skill_id,
+            payload.slot_kind,
+        )
 
     if inv.quantity > 1:
         inv.quantity -= 1

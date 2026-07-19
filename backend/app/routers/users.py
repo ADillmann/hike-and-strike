@@ -5,10 +5,21 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import get_current_user, hash_password, require_master
 from app.database import get_db
-from app.models import Character, User, UserRole
+from app.models import Character, GroupMember, InventoryItem, Skill, StatChangeLog, TemporaryEffect, User, UserRole
 from app.schemas import UserCreate, UserOut, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _delete_character(db: Session, character: Character) -> None:
+    """Remove a character and rows that reference it."""
+    cid = character.id
+    db.query(Skill).filter(Skill.character_id == cid).delete(synchronize_session=False)
+    db.query(InventoryItem).filter(InventoryItem.character_id == cid).delete(synchronize_session=False)
+    db.query(TemporaryEffect).filter(TemporaryEffect.character_id == cid).delete(synchronize_session=False)
+    db.query(StatChangeLog).filter(StatChangeLog.character_id == cid).delete(synchronize_session=False)
+    db.query(GroupMember).filter(GroupMember.character_id == cid).delete(synchronize_session=False)
+    db.delete(character)
 
 
 @router.get("/me", response_model=UserOut)
@@ -77,6 +88,9 @@ def delete_user(
     user = db.get(User, user_id)
     if not user or user.role != UserRole.player:
         raise HTTPException(status_code=404, detail="Player not found")
+    character = db.query(Character).filter(Character.user_id == user.id).first()
+    if character:
+        _delete_character(db, character)
     db.delete(user)
     db.commit()
     return {"ok": True}

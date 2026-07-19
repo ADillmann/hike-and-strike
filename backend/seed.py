@@ -1,9 +1,50 @@
 from sqlalchemy.orm import Session
 
 from app.game.constants import LEGACY_EQUIP_SLOTS
-from app.models import BattlePreset, EffectTemplate, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, SecretTemplate, Skill, SkillTemplate
+from app.models import BattlePreset, ClassTemplate, EffectTemplate, EnemyTemplate, EventTemplate, InventoryItem, ItemTemplate, SecretTemplate, Skill, SkillTemplate
 from app.services.battle_presets import DEFAULT_BATTLE_PRESETS
+from app.services.creation_settings import set_creation_bonus_points
 from app.services.currency import get_system_currency_settings
+
+SYSTEM_CLASSES = [
+    (
+        "Human",
+        "Versatile and adaptable. A balanced foundation for any path.",
+        {
+            # 10 on combat/social tracks unlocks 1 melee + 1 range + 1 support at creation
+            "strength": 10,
+            "dexterity": 10,
+            "intelligence": 10,
+            "durability": 9,
+            "charisma": 10,
+            "initiative": 9,
+        },
+    ),
+    (
+        "Elf",
+        "Graceful and sharp-minded. Favors agility and magic over brute force.",
+        {
+            "strength": 8,
+            "dexterity": 11,
+            "intelligence": 11,
+            "durability": 8,
+            "charisma": 9,
+            "initiative": 10,
+        },
+    ),
+    (
+        "Orc",
+        "Hardy and fierce. Built for melee power at the cost of subtlety.",
+        {
+            "strength": 12,
+            "dexterity": 8,
+            "intelligence": 8,
+            "durability": 11,
+            "charisma": 8,
+            "initiative": 8,
+        },
+    ),
+]
 
 BASE_ITEMS = [
     ("Iron Sword", "weapon", 1, {"damage": 4, "weapon_class": "melee"}, "A reliable blade.", 120),
@@ -285,6 +326,38 @@ def _migrate_shop_event(db: Session) -> None:
         shop.shop_config = {"allowed_tiers": [1, 2, 3], "buy_modifier_percent": 10}
 
 
+def _ensure_system_classes(db: Session) -> None:
+    by_name = {
+        row.name: row
+        for row in db.query(ClassTemplate).filter(ClassTemplate.is_system == True).all()  # noqa: E712
+    }
+    for name, description, base_stats in SYSTEM_CLASSES:
+        row = by_name.get(name)
+        if row:
+            row.description = description
+            row.base_stats = base_stats
+            continue
+        db.add(
+            ClassTemplate(
+                name=name,
+                description=description,
+                base_stats=base_stats,
+                is_system=True,
+                master_id=None,
+            )
+        )
+
+
+def _ensure_creation_settings(db: Session) -> None:
+    # Touch getter so default is readable; seed explicit value if missing
+    from app.models import GameSetting
+    from app.services.creation_settings import CREATION_BONUS_POINTS_KEY
+    from app.game.constants import POINT_BUY_POOL
+
+    if not db.get(GameSetting, CREATION_BONUS_POINTS_KEY):
+        set_creation_bonus_points(db, POINT_BUY_POOL)
+
+
 def seed_data(db: Session) -> None:
     if db.query(EventTemplate).filter(EventTemplate.is_generic == True).count() == 0:  # noqa: E712
         generic_events = [
@@ -302,6 +375,8 @@ def seed_data(db: Session) -> None:
             ))
 
     _ensure_currency_settings(db)
+    _ensure_creation_settings(db)
+    _ensure_system_classes(db)
     _ensure_system_items(db)
     _ensure_system_enemies(db)
     _ensure_system_presets(db)

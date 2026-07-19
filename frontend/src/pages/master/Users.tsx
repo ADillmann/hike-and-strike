@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import { api, REWARDS_BLOCKED_DURING_BATTLE, type Character, type UserInfo } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Layout, StatEditor } from '../../components/Layout';
+import {
+  allowedSlotsForEffect,
+  canAddResolved,
+  needsSlotChoice,
+  type SlotKind,
+} from '../../utils/skillSlots';
 
 interface StatLog {
   id: number;
@@ -16,6 +22,7 @@ interface SkillTemplateOption {
   id: number;
   name: string;
   max_uses_per_rest: number;
+  effect_type?: string;
 }
 
 const STAT_NAMES = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
@@ -36,7 +43,12 @@ export default function UsersPage() {
   const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
   const [historyCharId, setHistoryCharId] = useState<number | null>(null);
   const [statHistory, setStatHistory] = useState<StatLog[]>([]);
-  const [pendingAddSkill, setPendingAddSkill] = useState<{ templateId: number; name: string } | null>(null);
+  const [pendingAddSkill, setPendingAddSkill] = useState<{
+    templateId: number;
+    name: string;
+    effectType: string;
+    slotKind: SlotKind | null;
+  } | null>(null);
   const [pendingRemoveSkill, setPendingRemoveSkill] = useState<{ skillId: number; name: string } | null>(null);
   const [grantXpAmount, setGrantXpAmount] = useState(100);
   const [pendingGrantXp, setPendingGrantXp] = useState(false);
@@ -112,12 +124,22 @@ export default function UsersPage() {
 
   const assignSkill = async () => {
     if (!selectedChar || !pendingAddSkill) return;
-    const updated = await api.post<Character>(`/characters/${selectedChar.id}/skills`, {
-      skill_template_id: pendingAddSkill.templateId,
-    });
-    setSelectedChar(updated);
-    setPendingAddSkill(null);
-    load();
+    if (needsSlotChoice(pendingAddSkill.effectType) && !pendingAddSkill.slotKind) {
+      setError('Choose a skill slot');
+      return;
+    }
+    try {
+      const updated = await api.post<Character>(`/characters/${selectedChar.id}/skills`, {
+        skill_template_id: pendingAddSkill.templateId,
+        ...(pendingAddSkill.slotKind ? { slot_kind: pendingAddSkill.slotKind } : {}),
+      });
+      setSelectedChar(updated);
+      setPendingAddSkill(null);
+      setError('');
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign skill');
+    }
   };
 
   const removeSkill = async () => {
@@ -134,7 +156,12 @@ export default function UsersPage() {
     if (!selectedChar || !addSkillId) return;
     const template = skillTemplates.find((t) => t.id === addSkillId);
     if (!template) return;
-    setPendingAddSkill({ templateId: template.id, name: template.name });
+    setPendingAddSkill({
+      templateId: template.id,
+      name: template.name,
+      effectType: template.effect_type || 'none',
+      slotKind: null,
+    });
   };
 
   const requestRemoveSkill = (skillId: number, name: string) => {
@@ -271,7 +298,10 @@ export default function UsersPage() {
                 <div className="space-y-1">
                   {selectedChar.skills.map((s) => (
                     <div key={s.id} className="flex items-center justify-between rounded border border-dungeon-700 p-2 text-sm">
-                      <span>{s.name} ({s.uses_remaining}/{s.max_uses_per_rest})</span>
+                      <span>
+                        {s.name} ({s.uses_remaining}/{s.max_uses_per_rest})
+                        {s.slot_kind && <span className="ml-1 text-xs text-stone-500">· {s.slot_kind}</span>}
+                      </span>
                       <button type="button" className="btn-danger px-2 py-0.5 text-xs" onClick={() => requestRemoveSkill(s.id, s.name)}>
                         Remove
                       </button>
@@ -321,13 +351,49 @@ export default function UsersPage() {
       )}
 
       {pendingAddSkill && selectedChar && (
-        <ConfirmDialog
-          title="Add Skill"
-          message={`Add "${pendingAddSkill.name}" to ${selectedChar.name}?`}
-          confirmLabel="Add"
-          onConfirm={assignSkill}
-          onCancel={() => setPendingAddSkill(null)}
-        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card max-w-sm w-full space-y-3">
+            <h3 className="font-semibold text-dungeon-300">Add Skill</h3>
+            <p className="text-sm text-stone-400">
+              Add &quot;{pendingAddSkill.name}&quot; to {selectedChar.name}?
+            </p>
+            {needsSlotChoice(pendingAddSkill.effectType) && (
+              <div className="flex flex-wrap gap-2">
+                <span className="self-center text-xs text-stone-400">Place in:</span>
+                {allowedSlotsForEffect(pendingAddSkill.effectType).map((slot) => {
+                  const owned = selectedChar.skills.map((s) => s.slot_kind || 'support');
+                  const fits = canAddResolved(selectedChar.stats || {}, owned, slot);
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      className={`btn-secondary px-2 py-0.5 text-xs capitalize ${
+                        pendingAddSkill.slotKind === slot ? 'ring-1 ring-dungeon-300' : ''
+                      }`}
+                      disabled={!fits}
+                      onClick={() => setPendingAddSkill({ ...pendingAddSkill, slotKind: slot })}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={needsSlotChoice(pendingAddSkill.effectType) && !pendingAddSkill.slotKind}
+                onClick={assignSkill}
+              >
+                Add
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setPendingAddSkill(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pendingRemoveSkill && selectedChar && (

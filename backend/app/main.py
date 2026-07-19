@@ -15,6 +15,7 @@ from app.routers import (
     campaign_runtime,
     campaigns,
     characters,
+    classes,
     currency,
     enemies,
     events,
@@ -34,15 +35,24 @@ class SPAStaticFiles(StaticFiles):
     """Serve built frontend; fall back to index.html for client-side routes."""
 
     async def get_response(self, path: str, scope):
+        serve_index = path in ("", ".", "index.html")
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404 and scope["method"] in ("GET", "HEAD"):
                 index_path = Path(self.directory) / "index.html"
                 if index_path.is_file():
-                    return FileResponse(index_path)
-            raise
-
+                    response = FileResponse(index_path)
+                    serve_index = True
+                else:
+                    raise
+            else:
+                raise
+        # Always revalidate the shell so clients pick up new hashed asset names
+        if serve_index:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -78,6 +88,7 @@ api.include_router(groups.router)
 api.include_router(events.router)
 api.include_router(items.router)
 api.include_router(skills.router)
+api.include_router(classes.router)
 api.include_router(effects.router)
 api.include_router(secrets.router)
 api.include_router(currency.router)

@@ -15,6 +15,7 @@ import CampaignPage from './pages/player/Campaign';
 import BattlePage from './pages/Battle';
 import EnemiesPage from './pages/master/Enemies';
 import SkillsPageMaster from './pages/master/Skills';
+import ClassesPage from './pages/master/Classes';
 import EffectsPageMaster from './pages/master/Effects';
 import SecretsPageMaster from './pages/master/Secrets';
 import CurrencyPage from './pages/master/Currency';
@@ -38,6 +39,7 @@ export default function App() {
       <Route path="/organizer/items" element={<Protected role="master"><ItemsPage /></Protected>} />
       <Route path="/organizer/enemies" element={<Protected role="master"><EnemiesPage /></Protected>} />
       <Route path="/organizer/skills" element={<Protected role="master"><SkillsPageMaster /></Protected>} />
+      <Route path="/organizer/classes" element={<Protected role="master"><ClassesPage /></Protected>} />
       <Route path="/organizer/effects" element={<Protected role="master"><EffectsPageMaster /></Protected>} />
       <Route path="/organizer/secrets" element={<Protected role="master"><SecretsPageMaster /></Protected>} />
       <Route path="/organizer/currency" element={<Protected role="master"><CurrencyPage /></Protected>} />

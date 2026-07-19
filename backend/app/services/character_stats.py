@@ -26,6 +26,15 @@ def total_point_cost(stats: dict[str, int]) -> int:
     return sum(point_cost(stats.get(s, STAT_DEFAULT)) for s in STAT_NAMES)
 
 
+def bonus_points_spent(base_stats: dict[str, int], final_stats: dict[str, int]) -> int:
+    total = 0
+    for name in STAT_NAMES:
+        base = int(base_stats.get(name, STAT_DEFAULT))
+        final = int(final_stats.get(name, STAT_DEFAULT))
+        total += point_cost(final) - point_cost(base)
+    return total
+
+
 def validate_point_buy(stats: dict[str, int]) -> None:
     for name in STAT_NAMES:
         val = stats.get(name, STAT_DEFAULT)
@@ -33,6 +42,37 @@ def validate_point_buy(stats: dict[str, int]) -> None:
             raise ValueError(f"{name} must be between {STAT_MIN} and {STAT_MAX}")
     if total_point_cost(stats) > POINT_BUY_POOL:
         raise ValueError(f"Point buy exceeds pool of {POINT_BUY_POOL}")
+
+
+def validate_class_point_buy(
+    base_stats: dict[str, int],
+    final_stats: dict[str, int],
+    bonus_pool: int,
+) -> None:
+    for name in STAT_NAMES:
+        base = int(base_stats.get(name, STAT_DEFAULT))
+        final = int(final_stats.get(name, STAT_DEFAULT))
+        if final < STAT_MIN or final > STAT_MAX:
+            raise ValueError(f"{name} must be between {STAT_MIN} and {STAT_MAX}")
+        if final < base:
+            raise ValueError(f"{name} cannot be below class base ({base})")
+    spent = bonus_points_spent(base_stats, final_stats)
+    if spent > bonus_pool:
+        raise ValueError(f"Bonus points spent ({spent}) exceed pool of {bonus_pool}")
+    if spent < 0:
+        raise ValueError("Invalid stat allocation")
+
+
+def normalize_base_stats(raw: dict | None) -> dict[str, int]:
+    result = {s: STAT_DEFAULT for s in STAT_NAMES}
+    if not raw:
+        return result
+    for name in STAT_NAMES:
+        try:
+            result[name] = int(raw.get(name, STAT_DEFAULT))
+        except (TypeError, ValueError):
+            result[name] = STAT_DEFAULT
+    return result
 
 
 def normalize_equipped_slot(slot: str | None) -> str | None:

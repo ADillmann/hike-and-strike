@@ -40,11 +40,16 @@ def _legacy_params(name: str, effect_type: str) -> dict:
     return {}
 
 
-def skill_from_template(character_id: int, template: SkillTemplate) -> Skill:
+def skill_from_template(
+    character_id: int,
+    template: SkillTemplate,
+    slot_kind: str | None = None,
+) -> Skill:
     return Skill(
         character_id=character_id,
         skill_template_id=template.id,
         name=template.name,
         max_uses_per_rest=template.max_uses_per_rest,
         uses_remaining=template.max_uses_per_rest,
+        slot_kind=slot_kind,
     )

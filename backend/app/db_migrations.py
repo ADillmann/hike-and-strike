@@ -147,7 +147,60 @@ def apply_schema_patches(engine: Engine) -> None:
         "battle_config TEXT",
     )
     _ensure_currency_settings_table(engine)
+    _ensure_game_settings_table(engine)
+    _add_column_if_missing(
+        engine,
+        "characters",
+        "class_template_id",
+        "class_template_id INTEGER REFERENCES class_templates(id)",
+    )
+    _add_column_if_missing(engine, "skills", "slot_kind", "slot_kind VARCHAR(16)")
+    _backfill_skill_slot_kinds(engine)
     _reconcile_all_character_stat_points(engine)
+
+
+def _backfill_skill_slot_kinds(engine: Engine) -> None:
+    from app.models import Skill
+    from app.services.skill_effects import skill_battle_meta
+    from app.services.skill_slots import default_slot_for_backfill
+
+    with Session(engine) as session:
+        skills = (
+            session.query(Skill)
+            .filter(Skill.slot_kind.is_(None))
+            .all()
+        )
+        if not skills:
+            return
+        from sqlalchemy.orm import joinedload
+
+        skills = (
+            session.query(Skill)
+            .options(joinedload(Skill.skill_template))
+            .filter(Skill.slot_kind.is_(None))
+            .all()
+        )
+        for skill in skills:
+            effect = skill_battle_meta(skill).get("effect_type") or "none"
+            skill.slot_kind = default_slot_for_backfill(effect)
+        session.commit()
+
+
+def _ensure_game_settings_table(engine: Engine) -> None:
+    insp = inspect(engine)
+    if "game_settings" in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE game_settings (
+                    key VARCHAR(64) PRIMARY KEY,
+                    value TEXT DEFAULT ''
+                )
+                """
+            )
+        )
 
 
 def _ensure_currency_settings_table(engine: Engine) -> None:

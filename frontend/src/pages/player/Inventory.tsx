@@ -7,6 +7,12 @@ import { SOLVER_MODALS } from '../../components/secrets/solverRegistry';
 import { EQUIP_SLOTS, slotLabel } from '../../game/equipment';
 import { Layout } from '../../components/Layout';
 import type { Character } from '../../api/client';
+import {
+  allowedSlotsForEffect,
+  canAddResolved,
+  needsSlotChoice,
+  type SlotKind,
+} from '../../utils/skillSlots';
 
 type InvItem = Character['inventory'][number];
 
@@ -288,6 +294,15 @@ export default function InventoryPage() {
     skills: { id: number; name: string }[];
     skillToLearn: string;
     selectedSkillId: number;
+    slotKind: SlotKind | null;
+    needsSlot: boolean;
+    effectType: string;
+  } | null>(null);
+  const [slotPick, setSlotPick] = useState<{
+    inventoryItemId: number;
+    skillName: string;
+    effectType: string;
+    slotKind: SlotKind | null;
   } | null>(null);
   const [replaceBusy, setReplaceBusy] = useState(false);
   const navigate = useNavigate();
@@ -300,6 +315,8 @@ export default function InventoryPage() {
   };
 
   useEffect(() => { load(); }, [navigate]);
+
+  const ownedSlotKinds = (character?.skills || []).map((s) => s.slot_kind || 'support');
 
   const equip = async (inventoryItemId: number, slot: string) => {
     setError('');
@@ -316,23 +333,35 @@ export default function InventoryPage() {
     load();
   };
 
-  const useItem = async (inventoryItemId: number, replaceSkillId?: number) => {
+  const useItem = async (
+    inventoryItemId: number,
+    replaceSkillId?: number,
+    slotKind?: SlotKind | null,
+  ) => {
     setError('');
     try {
       await api.post('/characters/me/use-item', {
         inventory_item_id: inventoryItemId,
         ...(replaceSkillId != null ? { replace_skill_id: replaceSkillId } : {}),
+        ...(slotKind ? { slot_kind: slotKind } : {}),
       });
       setReplaceScroll(null);
+      setSlotPick(null);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && isSkillCapError(err.detail)) {
         const firstSkill = err.detail.skills[0];
+        const effectType = err.detail.skill_to_learn.effect_type
+          || character?.inventory.find((i) => i.id === inventoryItemId)?.teaches_skill_effect_type
+          || 'none';
         setReplaceScroll({
           inventoryItemId,
           skills: err.detail.skills,
           skillToLearn: err.detail.skill_to_learn.name,
           selectedSkillId: firstSkill?.id ?? 0,
+          slotKind: null,
+          needsSlot: needsSlotChoice(effectType),
+          effectType,
         });
         return;
       }
@@ -342,10 +371,18 @@ export default function InventoryPage() {
 
   const confirmReplaceScroll = async () => {
     if (!replaceScroll || !replaceScroll.selectedSkillId) return;
+    if (replaceScroll.needsSlot && !replaceScroll.slotKind) {
+      setError('Choose a skill slot');
+      return;
+    }
     setReplaceBusy(true);
     setError('');
     try {
-      await useItem(replaceScroll.inventoryItemId, replaceScroll.selectedSkillId);
+      await useItem(
+        replaceScroll.inventoryItemId,
+        replaceScroll.selectedSkillId,
+        replaceScroll.slotKind,
+      );
     } finally {
       setReplaceBusy(false);
     }
@@ -354,6 +391,7 @@ export default function InventoryPage() {
   const handleUseItem = (inventoryItemId: number) => {
     const item = character?.inventory.find((i) => i.id === inventoryItemId);
     const isScroll = Boolean(item?.skill_template_id);
+    const effectType = item?.teaches_skill_effect_type || 'none';
     const atCap = (character?.skills.length ?? 0) >= 20;
     if (isScroll && atCap && character) {
       setReplaceScroll({
@@ -361,6 +399,18 @@ export default function InventoryPage() {
         skills: character.skills.map((s) => ({ id: s.id, name: s.name })),
         skillToLearn: item?.teaches_skill_name || 'new spell',
         selectedSkillId: character.skills[0]?.id ?? 0,
+        slotKind: null,
+        needsSlot: needsSlotChoice(effectType),
+        effectType,
+      });
+      return;
+    }
+    if (isScroll && needsSlotChoice(effectType)) {
+      setSlotPick({
+        inventoryItemId,
+        skillName: item?.teaches_skill_name || 'new spell',
+        effectType,
+        slotKind: null,
       });
       return;
     }
@@ -549,16 +599,86 @@ export default function InventoryPage() {
                 </label>
               ))}
             </div>
+            {replaceScroll.needsSlot && (
+              <div className="flex flex-wrap gap-2">
+                <span className="self-center text-xs text-stone-400">Place in:</span>
+                {allowedSlotsForEffect(replaceScroll.effectType).map((slot) => {
+                  const withoutReplaced = (character?.skills || [])
+                    .filter((s) => s.id !== replaceScroll.selectedSkillId)
+                    .map((s) => s.slot_kind || 'support');
+                  const fits = canAddResolved(character?.stats || {}, withoutReplaced, slot);
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      className={`btn-secondary px-2 py-0.5 text-xs capitalize ${
+                        replaceScroll.slotKind === slot ? 'ring-1 ring-dungeon-300' : ''
+                      }`}
+                      disabled={!fits}
+                      onClick={() => setReplaceScroll({ ...replaceScroll, slotKind: slot })}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <div className="flex gap-2">
               <button
                 type="button"
                 className="btn-primary"
-                disabled={!replaceScroll.selectedSkillId || replaceBusy}
+                disabled={
+                  !replaceScroll.selectedSkillId
+                  || replaceBusy
+                  || (replaceScroll.needsSlot && !replaceScroll.slotKind)
+                }
                 onClick={confirmReplaceScroll}
               >
                 {replaceBusy ? 'Learning…' : 'Learn spell'}
               </button>
               <button type="button" className="btn-secondary" onClick={() => setReplaceScroll(null)} disabled={replaceBusy}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {slotPick && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card w-full max-w-md space-y-3">
+            <h3 className="font-semibold text-dungeon-200">Choose skill slot</h3>
+            <p className="text-sm text-stone-400">
+              Where should <span className="text-dungeon-200">{slotPick.skillName}</span> go?
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {allowedSlotsForEffect(slotPick.effectType).map((slot) => {
+                const fits = canAddResolved(character?.stats || {}, ownedSlotKinds, slot);
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    className={`btn-secondary px-2 py-0.5 text-xs capitalize ${
+                      slotPick.slotKind === slot ? 'ring-1 ring-dungeon-300' : ''
+                    }`}
+                    disabled={!fits}
+                    onClick={() => setSlotPick({ ...slotPick, slotKind: slot })}
+                  >
+                    {slot}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!slotPick.slotKind}
+                onClick={() => void useItem(slotPick.inventoryItemId, undefined, slotPick.slotKind)}
+              >
+                Learn
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setSlotPick(null)}>
                 Cancel
               </button>
             </div>
