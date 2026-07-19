@@ -4,15 +4,17 @@ import { api, type ClassTemplate } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout, StatBadge } from '../../components/Layout';
+import { useLocale } from '../../context/LocaleContext';
 import type { Character } from '../../api/client';
 import { formatBattleMods, formatStatMods } from '../../utils/effects';
 import {
   allowedSlotsForEffect,
   canAddResolved,
-  formatSlotSummary,
   needsSlotChoice,
   normalizeEffectType,
   resolveSlot,
+  slotCapacity,
+  slotUsageFromKinds,
   type SlotKind,
 } from '../../utils/skillSlots';
 
@@ -42,6 +44,7 @@ export default function CharacterCreatePage() {
   const [picks, setPicks] = useState<StarterPick[]>([]);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { t } = useLocale();
 
   useEffect(() => {
     Promise.all([
@@ -70,7 +73,11 @@ export default function CharacterCreatePage() {
   );
 
   const selectedKinds = useMemo(() => picks.map((p) => p.slotKind), [picks]);
-  const slotLine = formatSlotSummary(stats, selectedKinds);
+  const slotLine = useMemo(() => {
+    const capacity = slotCapacity(stats);
+    const used = slotUsageFromKinds(selectedKinds);
+    return `${t('slots.melee')} ${used.melee}/${capacity.melee} · ${t('slots.range')} ${used.range}/${capacity.range} · ${t('slots.support')} ${used.support}/${capacity.support}`;
+  }, [stats, selectedKinds, t]);
 
   const onClassChange = (id: number) => {
     setClassId(id);
@@ -111,7 +118,7 @@ export default function CharacterCreatePage() {
       return;
     }
     if (needsSlotChoice(skill.effect_type)) {
-      setError(`Use the Melee / Range / Support buttons to pick a slot for ${skill.name}`);
+      setError(t('character.err_use_slot_buttons', { name: skill.name }));
       return;
     }
     if (picks.length >= MAX_STARTER_SKILLS) return;
@@ -123,7 +130,7 @@ export default function CharacterCreatePage() {
     }
     const otherKinds = picks.map((p) => p.slotKind);
     if (!slot || !canAddResolved(stats, otherKinds, slot)) {
-      setError('No free skill slot for that pick — raise the matching stats or pick a different skill');
+      setError(t('character.err_no_free_slot'));
       return;
     }
     setError('');
@@ -134,12 +141,12 @@ export default function CharacterCreatePage() {
   const setFlexibleSlot = (skill: StarterSkill, slot: SlotKind) => {
     const without = picks.filter((p) => p.skillId !== skill.id);
     if (!canAddResolved(stats, without.map((p) => p.slotKind), slot)) {
-      setError(`No free ${slot} slot`);
+      setError(t('character.err_no_free_named_slot', { slot: t(`slots.${slot}`) }));
       return;
     }
     const already = picks.some((p) => p.skillId === skill.id);
     if (!already && without.length >= MAX_STARTER_SKILLS) {
-      setError(`Pick exactly ${MAX_STARTER_SKILLS} skills — clear one first`);
+      setError(t('character.err_clear_one_first', { n: MAX_STARTER_SKILLS }));
       return;
     }
     setError('');
@@ -153,16 +160,16 @@ export default function CharacterCreatePage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!classId) { setError('Pick a class'); return; }
-    if (bonusSpent > bonusPool) { setError('Too many bonus points spent'); return; }
+    if (!classId) { setError(t('character.err_pick_class')); return; }
+    if (bonusSpent > bonusPool) { setError(t('character.err_too_many_bonus')); return; }
     if (picks.length !== MAX_STARTER_SKILLS) {
-      setError(`Pick exactly ${MAX_STARTER_SKILLS} starter skills`);
+      setError(t('character.err_pick_starter', { n: MAX_STARTER_SKILLS }));
       return;
     }
     for (const pick of picks) {
       if (pick.slotKind !== 'melee' && pick.slotKind !== 'range' && pick.slotKind !== 'support') {
         const skill = starterSkills.find((s) => s.id === pick.skillId);
-        setError(`Choose a skill slot for ${skill?.name ?? 'skill'} (range or support)`);
+        setError(t('character.err_choose_slot', { name: skill?.name ?? '' }));
         return;
       }
     }
@@ -179,21 +186,21 @@ export default function CharacterCreatePage() {
       });
       navigate('/character');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setError(err instanceof Error ? err.message : t('common.failed'));
     }
   };
 
   return (
-    <Layout title="Create Character">
+    <Layout title={t('character.create_title')}>
       <form onSubmit={submit} className="card mx-auto max-w-lg space-y-4">
-        <h2 className="text-xl font-semibold text-dungeon-300">Forge Your Hero</h2>
+        <h2 className="text-xl font-semibold text-dungeon-300">{t('character.forge_heading')}</h2>
         {error && <p className="text-red-400">{error}</p>}
         <div>
-          <label className="label">Name</label>
+          <label className="label">{t('character.name')}</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
         </div>
         <div>
-          <label className="label">Class</label>
+          <label className="label">{t('character.class')}</label>
           <select
             className="input"
             value={classId ?? ''}
@@ -210,33 +217,33 @@ export default function CharacterCreatePage() {
         </div>
         <div>
           <div className="mb-2 flex justify-between">
-            <span className="label mb-0">Attributes</span>
-            <span className="text-sm text-stone-400">Bonus: {bonusSpent}/{bonusPool}</span>
+            <span className="label mb-0">{t('character.attributes')}</span>
+            <span className="text-sm text-stone-400">{t('character.bonus', { spent: bonusSpent, pool: bonusPool })}</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {STAT_NAMES.map((s) => (
               <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
-                <span className="flex-1 text-sm capitalize">{s.slice(0, 3)}</span>
+                <span className="flex-1 text-sm">{t(`stats.${s}`)}</span>
                 <button type="button" className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(s, -1)}>-</button>
                 <span>{stats[s]}</span>
                 <button type="button" className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(s, 1)}>+</button>
               </div>
             ))}
           </div>
-          <p className="mt-2 text-xs text-stone-500">Class floors cannot be lowered. Cap at creation: {STAT_CAP_CREATE}.</p>
+          <p className="mt-2 text-xs text-stone-500">{t('character.class_floors', { cap: STAT_CAP_CREATE })}</p>
         </div>
         <div>
           <div className="mb-1 flex justify-between">
-            <span className="label mb-0">Skill slots</span>
+            <span className="label mb-0">{t('character.skill_slots')}</span>
             <span className="text-sm text-stone-400">{slotLine}</span>
           </div>
           <p className="text-xs text-stone-500">
-            Melee slots (STR/DEX) are melee skills only. Heal / passives use range (INT) or support (CHA).
+            {t('character.slots_help')}
           </p>
         </div>
         <div>
           <div className="mb-2 flex justify-between">
-            <span className="label mb-0">Starter skills</span>
+            <span className="label mb-0">{t('character.starter_skills')}</span>
             <span className="text-sm text-stone-400">{picks.length}/{MAX_STARTER_SKILLS}</span>
           </div>
           <div className="space-y-2">
@@ -280,19 +287,19 @@ export default function CharacterCreatePage() {
                       <div className="flex flex-wrap items-baseline gap-x-2">
                         <span className="font-medium">{s.name}</span>
                         <span className="text-xs text-stone-500">
-                          {normalizeEffectType(s.effect_type)} · {s.max_uses_per_rest}/rest
+                          {normalizeEffectType(s.effect_type)} · {t('character.uses_per_rest', { n: s.max_uses_per_rest })}
                         </span>
                       </div>
                       {s.description && <p className="mt-0.5 text-xs text-stone-500">{s.description}</p>}
                       {!flexible && fixedSlot && (
-                        <p className="mt-1 text-xs text-dungeon-300">Uses {fixedSlot} slot</p>
+                        <p className="mt-1 text-xs text-dungeon-300">{t('character.uses_slot', { slot: t(`slots.${fixedSlot}`) })}</p>
                       )}
                       {flexible && (
                         <div className="mt-3 rounded border border-dashed border-dungeon-500 bg-dungeon-900/50 p-2">
                           <p className="mb-2 text-xs font-medium text-dungeon-200">
-                            {selected
-                              ? `Selected — in ${chosenSlot} slot`
-                              : 'Choose range or support:'}
+                            {selected && chosenSlot
+                              ? t('character.selected_in_slot', { slot: t(`slots.${chosenSlot}`) })
+                              : t('character.choose_range_support')}
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {flexibleSlots.map((slot) => {
@@ -302,13 +309,13 @@ export default function CharacterCreatePage() {
                                 <button
                                   key={slot}
                                   type="button"
-                                  className={`btn-secondary capitalize ${
+                                  className={`btn-secondary ${
                                     chosenSlot === slot ? 'ring-2 ring-dungeon-300' : ''
                                   }`}
                                   disabled={!canSelect}
                                   onClick={() => setFlexibleSlot(s, slot)}
                                 >
-                                  {slot}
+                                  {t(`slots.${slot}`)}
                                 </button>
                               );
                             })}
@@ -318,14 +325,14 @@ export default function CharacterCreatePage() {
                                 className="btn-secondary text-xs"
                                 onClick={() => clearPick(s.id)}
                               >
-                                Clear
+                                {t('common.clear')}
                               </button>
                             )}
                           </div>
                         </div>
                       )}
                       {!anySlotFree && !selected && (
-                        <p className="mt-1 text-xs text-red-400">No free slot — raise STR/DEX/INT/CHA</p>
+                        <p className="mt-1 text-xs text-red-400">{t('character.no_free_slot_stats')}</p>
                       )}
                     </div>
                   </div>
@@ -334,7 +341,7 @@ export default function CharacterCreatePage() {
             })}
           </div>
         </div>
-        <button className="btn-primary w-full" type="submit">Create Character</button>
+        <button className="btn-primary w-full" type="submit">{t('character.create_button')}</button>
       </form>
     </Layout>
   );
@@ -344,6 +351,7 @@ export function CharacterSheetPage() {
   const [character, setCharacter] = useState<Character | null>(null);
   const [pendingStat, setPendingStat] = useState<{ stat: string; cost: number } | null>(null);
   const navigate = useNavigate();
+  const { t } = useLocale();
 
   const load = () => {
     api.get<Character>('/characters/me').then(setCharacter).catch(() => navigate('/character/create'));
@@ -365,7 +373,7 @@ export function CharacterSheetPage() {
     load();
   };
 
-  if (!character) return <Layout title="Character">Loading...</Layout>;
+  if (!character) return <Layout title={t('character.title')}>{t('common.loading')}</Layout>;
 
   const eff = character.effective_stats || character.stats;
   const base = character.stats;
@@ -373,28 +381,32 @@ export function CharacterSheetPage() {
   const raiseCosts = character.stat_raise_costs ?? {};
 
   return (
-    <Layout title="Character Sheet">
+    <Layout title={t('character.sheet_title')}>
       <div className="card">
         <div className="flex flex-wrap items-start gap-4">
           <div>
             {character.portrait_path && (
               <img src={character.portrait_path} alt={character.name} className="mb-2 h-24 w-24 rounded object-cover" />
             )}
-            <ImageUpload label="Portrait" onUpload={uploadPortrait} />
+            <ImageUpload label={t('character.portrait')} onUpload={uploadPortrait} />
           </div>
           <div>
             <h2 className="text-2xl font-bold text-dungeon-300">{character.name}</h2>
-            <p className="text-stone-400">Class: {character.race}</p>
+            <p className="text-stone-400">{t('character.class_label', { name: character.race })}</p>
             <p className="mt-1">
-              Level {character.level ?? 1} — XP {character.xp ?? 0} / {character.xp_to_next_level ?? 100}
+              {t('character.level_xp', {
+                level: character.level ?? 1,
+                xp: character.xp ?? 0,
+                next: character.xp_to_next_level ?? 100,
+              })}
             </p>
-            <p className="text-sm text-dungeon-300">Free stat points: {freePoints}</p>
-            <p className="mt-1">HP: {character.current_hp} / {character.max_hp}</p>
-            <p>Attack bonus: {character.attack_bonus ?? '—'}</p>
+            <p className="text-sm text-dungeon-300">{t('character.free_stat_points', { n: freePoints })}</p>
+            <p className="mt-1">{t('character.hp', { current: character.current_hp, max: character.max_hp })}</p>
+            <p>{t('character.attack_bonus', { value: character.attack_bonus ?? '—' })}</p>
           </div>
         </div>
         <div className="mt-4">
-          <h3 className="mb-2 text-sm text-stone-400">Base stats (cap 20)</h3>
+          <h3 className="mb-2 text-sm text-stone-400">{t('character.base_stats')}</h3>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {STAT_NAMES.map((s) => {
               const current = base[s] || 8;
@@ -403,10 +415,10 @@ export function CharacterSheetPage() {
               return (
                 <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
                   <div className="flex-1">
-                    <StatBadge label={s.slice(0, 3)} value={eff[s] || current} />
+                    <StatBadge label={t(`stats.${s}`)} value={eff[s] || current} />
                     <p className="text-center text-xs text-stone-500">
-                      base {current}/20
-                      {(eff[s] || current) !== current && ` (eff ${eff[s]})`}
+                      {t('character.base_value', { current })}
+                      {(eff[s] || current) !== current && ` ${t('character.eff_value', { value: eff[s] })}`}
                     </p>
                   </div>
                   {canRaise && (
@@ -415,7 +427,7 @@ export function CharacterSheetPage() {
                       className="btn-secondary px-2 py-0.5 text-xs"
                       onClick={() => setPendingStat({ stat: s, cost })}
                     >
-                      + ({cost} pt{cost !== 1 ? 's' : ''})
+                      {t('character.raise_cost', { cost })}
                     </button>
                   )}
                 </div>
@@ -425,11 +437,11 @@ export function CharacterSheetPage() {
         </div>
         {character.skills.length > 0 && (
           <div className="mt-4">
-            <h3 className="mb-2 text-sm text-stone-400">Skills</h3>
+            <h3 className="mb-2 text-sm text-stone-400">{t('character.skills_heading')}</h3>
             <div className="space-y-1">
               {character.skills.map((s) => (
                 <div key={s.id} className="rounded border border-dungeon-700 px-2 py-1 text-sm">
-                  {s.name} — {s.uses_remaining}/{s.max_uses_per_rest} uses
+                  {s.name} — {t('skills.uses', { remaining: s.uses_remaining, max: s.max_uses_per_rest })}
                 </div>
               ))}
             </div>
@@ -437,7 +449,7 @@ export function CharacterSheetPage() {
         )}
         {(character.temporary_effects.length > 0 || (character.item_effects?.length ?? 0) > 0) && (
           <div className="mt-4">
-            <h3 className="text-sm text-stone-400">Active effects</h3>
+            <h3 className="text-sm text-stone-400">{t('character.effects_heading')}</h3>
             <div className="mt-1 space-y-1">
               {character.temporary_effects.map((e) => {
                 const statLine = formatStatMods(e.stat_modifiers);
@@ -456,7 +468,7 @@ export function CharacterSheetPage() {
                 return (
                   <div key={`item-${e.source_item}-${e.label}`} className="rounded bg-dungeon-800 px-2 py-1 text-xs">
                     <span className="font-medium">{e.label}</span>
-                    <span className="ml-2 text-stone-500">from {e.source_item}</span>
+                    <span className="ml-2 text-stone-500">{t('character.from_item', { name: e.source_item })}</span>
                     {statLine && <span className="ml-2 text-stone-400">{statLine}</span>}
                     {battleLine && <span className="ml-2 text-dungeon-300">{battleLine}</span>}
                   </div>
@@ -469,9 +481,12 @@ export function CharacterSheetPage() {
 
       {pendingStat && (
         <ConfirmDialog
-          title="Allocate Stat Point"
-          message={`Spend ${pendingStat.cost} free point${pendingStat.cost !== 1 ? 's' : ''} to raise ${pendingStat.stat} by 1? This cannot be undone by you.`}
-          confirmLabel="Allocate"
+          title={t('character.confirm_spend_title')}
+          message={t('character.confirm_spend_message', {
+            cost: pendingStat.cost,
+            stat: t(`stats.${pendingStat.stat}_full`),
+          })}
+          confirmLabel={t('character.allocate')}
           onConfirm={allocateStat}
           onCancel={() => setPendingStat(null)}
         />

@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
 import { ShopModal } from '../../components/shop/ShopModal';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
+import { useLocale } from '../../context/LocaleContext';
 import type { Character } from '../../api/client';
 import { formatBattleMods, formatStatMods } from '../../utils/effects';
 
@@ -25,6 +26,7 @@ interface CampaignView {
 
 export default function CampaignPage() {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const [data, setData] = useState<CampaignView>({ active: false });
   const [campaignId, setCampaignId] = useState<number | null>(null);
   const [myCharacter, setMyCharacter] = useState<Character | null>(null);
@@ -90,16 +92,16 @@ export default function CampaignPage() {
 
   if (!data.active) {
     return (
-      <Layout title="Campaign">
+      <Layout title={t('campaign.title')}>
         <div className="card text-center">
-          <p className="text-stone-400">No active campaign. Wait for your Master to start one.</p>
+          <p className="text-stone-400">{t('campaign.no_campaign')}</p>
         </div>
       </Layout>
     );
   }
 
   return (
-    <Layout title={`Campaign: ${data.name}`}>
+    <Layout title={t('campaign.title_named', { name: data.name || '' })}>
       <div className="grid gap-4 md:grid-cols-3">
         <section className="card md:col-span-2">
           <h2 className="mb-2 text-xl font-semibold text-dungeon-300">{data.current_node?.event.name}</h2>
@@ -115,28 +117,30 @@ export default function CampaignPage() {
             <div className="mt-4 rounded border border-dungeon-500 p-3 text-dungeon-300">
               {activeBattleId ? (
                 <>
-                  <p className="mb-2">Battle is ready — opening combat…</p>
+                  <p className="mb-2">{t('campaign.battle_ready')}</p>
                   <button type="button" className="btn-primary text-sm" onClick={() => goToBattle(activeBattleId)}>
-                    Join Battle
+                    {t('campaign.join_battle')}
                   </button>
                 </>
               ) : (
-                <p>A battle is coming — wait for the Master to set up combat.</p>
+                <p>{t('campaign.battle_coming')}</p>
               )}
             </div>
           )}
           {data.current_node?.event.event_type === 'shop' && (
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" className="btn-primary" onClick={() => setShopOpen(true)}>Buy</button>
-              <button type="button" className="btn-secondary" onClick={() => setShopOpen(true)}>Sell</button>
+              <button type="button" className="btn-primary" onClick={() => setShopOpen(true)}>{t('campaign.buy')}</button>
+              <button type="button" className="btn-secondary" onClick={() => setShopOpen(true)}>{t('campaign.sell')}</button>
               {myCharacter?.wallet_display && (
-                <span className="self-center text-sm text-stone-400">Wallet: {myCharacter.wallet_display}</span>
+                <span className="self-center text-sm text-stone-400">
+                  {t('campaign.wallet', { amount: myCharacter.wallet_display })}
+                </span>
               )}
             </div>
           )}
         </section>
         <section className="card">
-          <h3 className="mb-2 font-semibold text-dungeon-300">Party</h3>
+          <h3 className="mb-2 font-semibold text-dungeon-300">{t('campaign.party')}</h3>
           {data.party?.map((p, i) => (
             <div key={i} className="mb-2 text-sm">
               {p.name} — HP {p.current_hp}/{p.max_hp}
@@ -144,7 +148,7 @@ export default function CampaignPage() {
           ))}
           {myCharacter && myCharacter.temporary_effects.length > 0 && (
             <div className="mt-3 border-t border-dungeon-700 pt-2">
-              <h4 className="text-xs text-stone-500">Your effects</h4>
+              <h4 className="text-xs text-stone-500">{t('campaign.your_effects')}</h4>
               <div className="mt-1 space-y-1">
                 {myCharacter.temporary_effects.map((e) => {
                   const statLine = formatStatMods(e.stat_modifiers);
@@ -160,7 +164,7 @@ export default function CampaignPage() {
               </div>
             </div>
           )}
-          <p className="mt-4 text-xs text-stone-500">Discuss with your group. The Master will advance the story.</p>
+          <p className="mt-4 text-xs text-stone-500">{t('campaign.discuss_help')}</p>
         </section>
       </div>
 

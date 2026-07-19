@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, setToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -9,6 +10,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [setupMode, setSetupMode] = useState(false);
   const { login, refresh } = useAuth();
+  const { t } = useLocale();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export default function LoginPage() {
       else if (!me.has_character) navigate('/character/create');
       else navigate('/character');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : t('login.failed'));
     }
   };
 
@@ -40,19 +42,19 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="card w-full max-w-md space-y-4">
         <h1 className="text-center text-3xl font-bold text-dungeon-300">Hike&amp;strike</h1>
         <p className="text-center text-sm text-stone-400">
-          {setupMode ? 'Create your Master account' : 'Enter the dungeon'}
+          {setupMode ? t('login.setup_tagline') : t('login.tagline')}
         </p>
         {error && <p className="text-center text-red-400">{error}</p>}
         <div>
-          <label className="label">Username</label>
+          <label className="label">{t('login.username')}</label>
           <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} required />
         </div>
         <div>
-          <label className="label">Password</label>
+          <label className="label">{t('login.password')}</label>
           <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
         <button className="btn-primary w-full" type="submit">
-          {setupMode ? 'Create Master' : 'Login'}
+          {setupMode ? t('login.create_master') : t('login.submit')}
         </button>
       </form>
     </div>

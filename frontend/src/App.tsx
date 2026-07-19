@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { useLocale } from './context/LocaleContext';
 import LoginPage from './pages/Login';
+import AccountPage from './pages/Account';
 import DashboardPage from './pages/master/Dashboard';
 import UsersPage from './pages/master/Users';
 import GroupsPage from './pages/master/Groups';
@@ -22,7 +24,8 @@ import CurrencyPage from './pages/master/Currency';
 
 function Protected({ children, role }: { children: React.ReactNode; role?: 'master' | 'player' }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
+  const { t } = useLocale();
+  if (loading) return <div className="flex min-h-screen items-center justify-center">{t('common.loading')}</div>;
   if (!user) return <Navigate to="/login" replace />;
   if (role && user.role !== role) return <Navigate to={user.role === 'master' ? '/organizer' : '/character'} replace />;
   return <>{children}</>;
@@ -32,6 +35,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/account" element={<Protected><AccountPage /></Protected>} />
       <Route path="/organizer" element={<Protected role="master"><DashboardPage /></Protected>} />
       <Route path="/organizer/users" element={<Protected role="master"><UsersPage /></Protected>} />
       <Route path="/organizer/groups" element={<Protected role="master"><GroupsPage /></Protected>} />

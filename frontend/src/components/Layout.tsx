@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 
 export function Layout({ children, title }: { children: React.ReactNode; title?: string }) {
   const { user, logout } = useAuth();
+  const { t } = useLocale();
   const isMaster = user?.role === 'master';
 
   return (
@@ -33,15 +35,16 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
               </>
             ) : (
               <>
-                <Link className="hover:text-dungeon-300" to="/character">Character</Link>
-                <Link className="hover:text-dungeon-300" to="/inventory">Inventory</Link>
-                <Link className="hover:text-dungeon-300" to="/skills">Skills</Link>
-                <Link className="hover:text-dungeon-300" to="/campaign">Campaign</Link>
+                <Link className="hover:text-dungeon-300" to="/character">{t('nav.character')}</Link>
+                <Link className="hover:text-dungeon-300" to="/inventory">{t('nav.inventory')}</Link>
+                <Link className="hover:text-dungeon-300" to="/skills">{t('nav.skills')}</Link>
+                <Link className="hover:text-dungeon-300" to="/campaign">{t('nav.campaign')}</Link>
               </>
             )}
             <span className="text-stone-500">|</span>
+            <Link className="hover:text-dungeon-300" to="/account">{t('common.account')}</Link>
             <span className="text-stone-400">{user?.username}</span>
-            <button className="btn-secondary text-sm" onClick={logout}>Logout</button>
+            <button className="btn-secondary text-sm" onClick={logout}>{t('common.logout')}</button>
           </nav>
         </div>
       </header>
@@ -66,12 +69,13 @@ export function StatEditor({
   stats: Record<string, number>;
   onChange: (stat: string, value: number) => void;
 }) {
+  const { t } = useLocale();
   const statNames = ['strength', 'dexterity', 'intelligence', 'durability', 'charisma', 'initiative'];
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {statNames.map((s) => (
         <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
-          <span className="flex-1 capitalize text-sm">{s.slice(0, 3)}</span>
+          <span className="flex-1 text-sm uppercase">{t(`stats.${s}`)}</span>
           <button className="btn-secondary px-2 py-1 text-sm" onClick={() => onChange(s, (stats[s] || 8) - 1)}>-</button>
           <span className="w-6 text-center">{stats[s] || 8}</span>
           <button className="btn-secondary px-2 py-1 text-sm" onClick={() => onChange(s, (stats[s] || 8) + 1)}>+</button>

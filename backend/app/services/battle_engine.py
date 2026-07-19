@@ -501,7 +501,13 @@ def apply_prebattle_move(
     ]
     if not state["prebattle_pending"]:
         state["phase"] = "ready"
-    state["log"] = state.get("log", []) + [_log_entry(f"{actor['name']} repositions before battle.")]
+    state["log"] = state.get("log", []) + [
+        _log_entry(
+            f"{actor['name']} repositions before battle.",
+            key="battle_log.reposition",
+            params={"actor": actor["name"]},
+        )
+    ]
     return state, "ok"
 
 
@@ -514,7 +520,9 @@ def skip_remaining_prebattle(state: dict[str, Any]) -> dict[str, Any]:
     state["actors"] = actors
     state["prebattle_pending"] = []
     state["phase"] = "ready"
-    state["log"] = state.get("log", []) + [_log_entry("Pre-battle positioning skipped.")]
+    state["log"] = state.get("log", []) + [
+        _log_entry("Pre-battle positioning skipped.", key="battle_log.prebattle_skipped")
+    ]
     return state
 
 
@@ -542,8 +550,13 @@ def start_battle(state: dict[str, Any]) -> dict[str, Any]:
     active = _get_actor(state, state["active_actor_id"])
     if active:
         active["guarding"] = False
+    first = _actor_name(state, state["active_actor_id"])
     state["log"] = state.get("log", []) + [
-        _log_entry(f"Battle begins! {_actor_name(state, state['active_actor_id'])} acts first.")
+        _log_entry(
+            f"Battle begins! {first} acts first.",
+            key="battle_log.battle_begins",
+            params={"actor": first},
+        )
     ]
     return resolve_auto_turns(state)
 
@@ -557,8 +570,49 @@ def _actor_name(state: dict, actor_id: str | None) -> str:
     return "—"
 
 
-def _log_entry(message: str) -> dict:
-    return {"message": message, "timestamp": datetime.now(timezone.utc).isoformat()}
+def _log_entry(message: str, key: str | None = None, params: dict | None = None) -> dict:
+    entry: dict[str, Any] = {
+        "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if key:
+        entry["key"] = key
+        entry["params"] = params or {}
+    return entry
+
+
+def _structured_log(key: str, params: dict[str, Any], message: str) -> dict[str, Any]:
+    """English fallback message plus i18n key/params for the client."""
+    return {"message": message, "key": key, "params": params}
+
+
+def _append_log(state: dict[str, Any], payload: str | dict[str, Any]) -> None:
+    if isinstance(payload, str):
+        state["log"] = state.get("log", []) + [_log_entry(payload)]
+        return
+    state["log"] = state.get("log", []) + [
+        _log_entry(payload["message"], key=payload.get("key"), params=payload.get("params"))
+    ]
+
+
+def _with_combat_extras(
+    base_msg: str,
+    *,
+    shield_abs: int = 0,
+    guard_red: int = 0,
+    defeated_name: str | None = None,
+    splash: str = "",
+) -> str:
+    msg = base_msg
+    if shield_abs:
+        msg += f" ({shield_abs} absorbed by shield)"
+    if guard_red:
+        msg += f" ({guard_red} reduced by guard)"
+    if defeated_name:
+        msg += f" {defeated_name} is defeated!"
+    if splash:
+        msg += splash
+    return msg
 
 
 def _pick_next_actor(state: dict[str, Any]) -> str | None:
@@ -756,19 +810,31 @@ def _execute_melee_attack(
     base = max(1, atk_bonus + roll - _mitigation(target) + dmg_mod)
     damage = apply_charge_penalty(base, cells_moved)
     _, shield_abs, guard_red = _apply_damage(target, damage)
-    msg = f"{actor['name']} attacks {target['name']} for {damage} damage!"
+    params: dict[str, Any] = {
+        "actor": actor["name"],
+        "target": target["name"],
+        "damage": damage,
+        "cells": cells_moved,
+        "shield_abs": shield_abs or 0,
+        "guard_red": guard_red or 0,
+        "defeated": not target["alive"],
+    }
     if cells_moved:
+        key = "battle_log.melee_charge"
         msg = f"{actor['name']} charges {cells_moved} cell(s) and attacks {target['name']} for {damage} damage!"
-    if shield_abs:
-        msg += f" ({shield_abs} absorbed by shield)"
-    if guard_red:
-        msg += f" ({guard_red} reduced by guard)"
-    if not target["alive"]:
-        msg += f" {target['name']} is defeated!"
-    return msg, damage
+    else:
+        key = "battle_log.melee_attack"
+        msg = f"{actor['name']} attacks {target['name']} for {damage} damage!"
+    msg = _with_combat_extras(
+        msg,
+        shield_abs=shield_abs or 0,
+        guard_red=guard_red or 0,
+        defeated_name=target["name"] if not target["alive"] else None,
+    )
+    return _structured_log(key, params, msg), damage
 
 
-def _execute_ranged_attack(state: dict, actor: dict, target: dict) -> str:
+def _execute_ranged_attack(state: dict, actor: dict, target: dict) -> dict[str, Any]:
     wp = _weapon_profile(actor)
     max_range = int(wp.get("weapon_range", DEFAULT_RANGE_DISTANCE))
     if not can_range_attack(state, actor, target, max_range):
@@ -777,14 +843,21 @@ def _execute_ranged_attack(state: dict, actor: dict, target: dict) -> str:
     dmg_mod = _battle_damage_mod(actor)
     base = max(1, wp["ranged_attack_bonus"] + roll - _mitigation(target) + dmg_mod)
     _, shield_abs, guard_red = _apply_damage(target, base)
-    msg = f"{actor['name']} shoots {target['name']} for {base} damage!"
-    if shield_abs:
-        msg += f" ({shield_abs} absorbed by shield)"
-    if guard_red:
-        msg += f" ({guard_red} reduced by guard)"
-    if not target["alive"]:
-        msg += f" {target['name']} is defeated!"
-    return msg
+    params: dict[str, Any] = {
+        "actor": actor["name"],
+        "target": target["name"],
+        "damage": base,
+        "shield_abs": shield_abs or 0,
+        "guard_red": guard_red or 0,
+        "defeated": not target["alive"],
+    }
+    msg = _with_combat_extras(
+        f"{actor['name']} shoots {target['name']} for {base} damage!",
+        shield_abs=shield_abs or 0,
+        guard_red=guard_red or 0,
+        defeated_name=target["name"] if not target["alive"] else None,
+    )
+    return _structured_log("battle_log.ranged_attack", params, msg)
 
 
 def _skill_max_range(params: dict) -> int:
@@ -818,12 +891,16 @@ def _apply_support_to_actor(
     recipient: dict,
     params: dict,
     db: Session | None,
-) -> str:
+) -> dict[str, Any]:
     mode = params.get("support_mode", "shield")
     if mode == "shield":
         amount = int(params.get("shield_amount", 5))
         recipient["shield_hp"] = int(recipient.get("shield_hp") or 0) + amount
-        return f"{amount} shield HP"
+        return {
+            "text": f"{amount} shield HP",
+            "key": "battle_log.support_shield",
+            "params": {"amount": amount},
+        }
     if mode == "stat_boost":
         stat = params.get("stat", "strength")
         bonus = int(params.get("stat_bonus", 1))
@@ -834,13 +911,21 @@ def _apply_support_to_actor(
             gain = bonus // 3
             if gain:
                 recipient["attack_bonus"] = recipient.get("attack_bonus", 0) + gain
-        return f"+{bonus} {stat}"
+        return {
+            "text": f"+{bonus} {stat}",
+            "key": "battle_log.support_stat",
+            "params": {"bonus": bonus, "stat": stat},
+        }
     if mode == "damage_boost":
         amount = int(params.get("damage_boost_amount", 1))
         bmods = dict(recipient.get("battle_modifiers") or {})
         bmods["damage_dealt_mod"] = int(bmods.get("damage_dealt_mod", 0)) + amount
         recipient["battle_modifiers"] = bmods
-        return f"+{amount} damage dealt"
+        return {
+            "text": f"+{amount} damage dealt",
+            "key": "battle_log.support_damage",
+            "params": {"amount": amount},
+        }
     if mode == "apply_effect":
         if not db:
             raise ValueError("Effect unavailable")
@@ -849,14 +934,20 @@ def _apply_support_to_actor(
         if not template or not template.active_in_battle:
             raise ValueError("Effect unavailable")
         _apply_battle_effect_template_to_actor(recipient, template)
-        return template.label or template.name
+        label = template.label or template.name
+        return {
+            "text": label,
+            "key": "battle_log.support_effect",
+            "params": {"effect": label},
+        }
     raise ValueError("Unknown support mode")
 
 
-def _apply_heal_splash(state: dict, primary: dict, radius: int, heal_amount: int) -> str:
+def _apply_heal_splash(state: dict, primary: dict, radius: int, heal_amount: int) -> tuple[str, list[dict[str, Any]]]:
     center = actor_pos(primary)
     splash_heal = max(1, int(heal_amount * SPLASH_EFFECT_FACTOR))
     extra = ""
+    events: list[dict[str, Any]] = []
     for cell in cells_in_radius(center, radius):
         for other in state.get("actors", []):
             if other["id"] == primary["id"] or not other["alive"]:
@@ -865,7 +956,12 @@ def _apply_heal_splash(state: dict, primary: dict, radius: int, heal_amount: int
                 continue
             other["current_hp"] = min(other["max_hp"], other["current_hp"] + splash_heal)
             extra += f" {other['name']} +{splash_heal} HP (splash)!"
-    return extra
+            events.append({
+                "key": "battle_log.heal_splash",
+                "name": other["name"],
+                "amount": splash_heal,
+            })
+    return extra, events
 
 
 def _find_skill(actor: dict, skill_id: int | str | None, action: str) -> dict | None:
@@ -888,7 +984,7 @@ def _apply_skill(
     skill: dict,
     charge_cell: dict | None,
     db: Session | None = None,
-) -> str:
+) -> dict[str, Any]:
     effect = normalize_effect_type(skill.get("effect_type", "none"))
     params = skill.get("effect_params") or {}
     name = skill.get("name", "Skill")
@@ -903,11 +999,23 @@ def _apply_skill(
         heal_amount = max(1, heal_base + _actor_stat(actor, "intelligence") // 2 + _battle_heal_mod(actor))
         target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal_amount)
         skill["uses_remaining"] -= 1
-        msg = f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!"
+        splash_events: list[dict[str, Any]] = []
+        splash_txt = ""
         splash_radius = int(params.get("splash_radius", 0))
         if splash_radius > 0:
-            msg += _apply_heal_splash(state, target, splash_radius, heal_amount)
-        return msg
+            splash_txt, splash_events = _apply_heal_splash(state, target, splash_radius, heal_amount)
+        msg = f"{actor['name']} uses {name} on {target['name']} for {heal_amount} HP!" + splash_txt
+        return _structured_log(
+            "battle_log.skill_heal",
+            {
+                "actor": actor["name"],
+                "skill": name,
+                "target": target["name"],
+                "heal": heal_amount,
+                "splash": splash_events,
+            },
+            msg,
+        )
 
     splash_radius = int(params.get("splash_radius", 0))
 
@@ -916,11 +1024,31 @@ def _apply_skill(
             raise ValueError("Invalid target")
         if not can_melee_attack(state, actor, target):
             raise ValueError("Cannot reach target")
-        msg, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
+        log_payload, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=False)
         skill["uses_remaining"] -= 1
+        splash_txt = ""
+        splash_events: list[dict[str, Any]] = []
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, primary_damage)
-        return msg.replace(f"{actor['name']} attacks", f"{actor['name']} uses {name} on", 1)
+            splash_txt, splash_events = _apply_splash(state, actor, target, splash_radius, primary_damage)
+        params_out = dict(log_payload["params"])
+        params_out["skill"] = name
+        params_out["splash"] = splash_events
+        key = "battle_log.skill_melee_charge" if params_out.get("cells") else "battle_log.skill_melee"
+        if params_out.get("cells"):
+            base = (
+                f"{actor['name']} charges {params_out['cells']} cell(s) and uses {name} on "
+                f"{target['name']} for {params_out['damage']} damage!"
+            )
+        else:
+            base = f"{actor['name']} uses {name} on {target['name']} for {params_out['damage']} damage!"
+        msg = _with_combat_extras(
+            base,
+            shield_abs=params_out.get("shield_abs") or 0,
+            guard_red=params_out.get("guard_red") or 0,
+            defeated_name=target["name"] if params_out.get("defeated") else None,
+            splash=splash_txt,
+        )
+        return _structured_log(key, params_out, msg)
 
     if effect == "range":
         if not target or not target["alive"] or actor["type"] == target["type"]:
@@ -934,41 +1062,73 @@ def _apply_skill(
         damage = max(1, _actor_stat(actor, range_stat) // 2 + roll + bonus - _mitigation(target) + _battle_damage_mod(actor))
         _, shield_abs, guard_red = _apply_damage(target, damage)
         skill["uses_remaining"] -= 1
-        msg = f"{actor['name']} uses {name} (range) on {target['name']} for {damage} damage!"
-        if shield_abs:
-            msg += f" ({shield_abs} absorbed by shield)"
-        if guard_red:
-            msg += f" (guard reduced {guard_red})"
-        if not target["alive"]:
-            msg += f" {target['name']} is defeated!"
+        splash_txt = ""
+        splash_events: list[dict[str, Any]] = []
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, damage)
-        return msg
+            splash_txt, splash_events = _apply_splash(state, actor, target, splash_radius, damage)
+        params_out: dict[str, Any] = {
+            "actor": actor["name"],
+            "skill": name,
+            "target": target["name"],
+            "damage": damage,
+            "shield_abs": shield_abs or 0,
+            "guard_red": guard_red or 0,
+            "defeated": not target["alive"],
+            "splash": splash_events,
+        }
+        msg = _with_combat_extras(
+            f"{actor['name']} uses {name} (range) on {target['name']} for {damage} damage!",
+            shield_abs=shield_abs or 0,
+            guard_red=guard_red or 0,
+            defeated_name=target["name"] if not target["alive"] else None,
+            splash=splash_txt,
+        )
+        return _structured_log("battle_log.skill_range", params_out, msg)
 
     if effect == "support":
         recipients = _support_recipients(state, target, params)
         if not recipients:
             raise ValueError("Invalid support target")
-        details: list[str] = []
+        details_text: list[str] = []
+        detail_events: list[dict[str, Any]] = []
         for recipient in recipients:
             detail = _apply_support_to_actor(recipient, params, db)
-            details.append(f"{recipient['name']} ({detail})")
+            details_text.append(f"{recipient['name']} ({detail['text']})")
+            detail_events.append({
+                "name": recipient["name"],
+                "detail_key": detail["key"],
+                "detail_params": detail["params"],
+            })
         skill["uses_remaining"] -= 1
-        if _is_party_wide_support(params):
-            return f"{actor['name']} uses {name} on the party — " + "; ".join(details) + "!"
-        return f"{actor['name']} uses {name} — " + "; ".join(details) + "!"
+        party_wide = _is_party_wide_support(params)
+        if party_wide:
+            msg = f"{actor['name']} uses {name} on the party — " + "; ".join(details_text) + "!"
+            key = "battle_log.skill_support_party"
+        else:
+            msg = f"{actor['name']} uses {name} — " + "; ".join(details_text) + "!"
+            key = "battle_log.skill_support"
+        return _structured_log(
+            key,
+            {"actor": actor["name"], "skill": name, "details": detail_events},
+            msg,
+        )
     raise ValueError("Skill not usable in battle")
 
 
-def _execute_enemy_heal(healer: dict, ally: dict) -> str:
+def _execute_enemy_heal(healer: dict, ally: dict) -> dict[str, Any]:
     stats = healer.get("stats") or {}
     heal_base = int(stats.get("heal_base", 5))
     heal_amount = max(1, heal_base + _actor_stat(healer, "intelligence") // 2 + _battle_heal_mod(healer))
     ally["current_hp"] = min(ally["max_hp"], ally["current_hp"] + heal_amount)
-    return f"{healer['name']} heals {ally['name']} for {heal_amount} HP!"
+    msg = f"{healer['name']} heals {ally['name']} for {heal_amount} HP!"
+    return _structured_log(
+        "battle_log.enemy_heal",
+        {"actor": healer["name"], "target": ally["name"], "heal": heal_amount},
+        msg,
+    )
 
 
-def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, charge_cell: dict | None) -> str:
+def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, charge_cell: dict | None) -> dict[str, Any]:
     effect = normalize_effect_type(skill.get("effect_type", "none"))
     params = skill.get("effect_params") or {}
     name = skill.get("name", "Skill")
@@ -981,11 +1141,31 @@ def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, char
             raise ValueError("Invalid target")
         if not can_melee_attack(state, actor, target):
             raise ValueError("Cannot reach target")
-        msg, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=True)
+        log_payload, primary_damage = _execute_melee_attack(state, actor, target, charge_cell, is_enemy=True)
         skill["uses_remaining"] -= 1
+        splash_txt = ""
+        splash_events: list[dict[str, Any]] = []
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, primary_damage)
-        return msg.replace(f"{actor['name']} attacks", f"{actor['name']} casts {name} on", 1)
+            splash_txt, splash_events = _apply_splash(state, actor, target, splash_radius, primary_damage)
+        params_out = dict(log_payload["params"])
+        params_out["skill"] = name
+        params_out["splash"] = splash_events
+        key = "battle_log.enemy_skill_melee_charge" if params_out.get("cells") else "battle_log.enemy_skill_melee"
+        if params_out.get("cells"):
+            base = (
+                f"{actor['name']} charges {params_out['cells']} cell(s) and casts {name} on "
+                f"{target['name']} for {params_out['damage']} damage!"
+            )
+        else:
+            base = f"{actor['name']} casts {name} on {target['name']} for {params_out['damage']} damage!"
+        msg = _with_combat_extras(
+            base,
+            shield_abs=params_out.get("shield_abs") or 0,
+            guard_red=params_out.get("guard_red") or 0,
+            defeated_name=target["name"] if params_out.get("defeated") else None,
+            splash=splash_txt,
+        )
+        return _structured_log(key, params_out, msg)
 
     if effect == "range":
         if not target or not target["alive"] or target["type"] != "player":
@@ -999,24 +1179,37 @@ def _apply_enemy_skill(state: dict, actor: dict, target: dict, skill: dict, char
         damage = max(1, _actor_stat(actor, range_stat) // 2 + roll + bonus - _mitigation(target) + _battle_damage_mod(actor))
         _, shield_abs, guard_red = _apply_damage(target, damage)
         skill["uses_remaining"] -= 1
-        msg = f"{actor['name']} casts {name} on {target['name']} for {damage} damage!"
-        if shield_abs:
-            msg += f" ({shield_abs} absorbed by shield)"
-        if guard_red:
-            msg += f" (guard reduced {guard_red})"
-        if not target["alive"]:
-            msg += f" {target['name']} is defeated!"
+        splash_txt = ""
+        splash_events: list[dict[str, Any]] = []
         if splash_radius > 0:
-            msg += _apply_splash(state, actor, target, splash_radius, damage)
-        return msg
+            splash_txt, splash_events = _apply_splash(state, actor, target, splash_radius, damage)
+        params_out = {
+            "actor": actor["name"],
+            "skill": name,
+            "target": target["name"],
+            "damage": damage,
+            "shield_abs": shield_abs or 0,
+            "guard_red": guard_red or 0,
+            "defeated": not target["alive"],
+            "splash": splash_events,
+        }
+        msg = _with_combat_extras(
+            f"{actor['name']} casts {name} on {target['name']} for {damage} damage!",
+            shield_abs=shield_abs or 0,
+            guard_red=guard_red or 0,
+            defeated_name=target["name"] if not target["alive"] else None,
+            splash=splash_txt,
+        )
+        return _structured_log("battle_log.enemy_skill_range", params_out, msg)
 
     raise ValueError("Skill not usable in battle")
 
 
-def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, primary_damage: int) -> str:
+def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, primary_damage: int) -> tuple[str, list[dict[str, Any]]]:
     center = actor_pos(primary)
     splash_dmg = max(1, int(primary_damage * SPLASH_EFFECT_FACTOR))
     extra = ""
+    events: list[dict[str, Any]] = []
     for cell in cells_in_radius(center, radius):
         for other in state.get("actors", []):
             if other["id"] == primary["id"] or not other["alive"]:
@@ -1027,11 +1220,19 @@ def _apply_splash(state: dict, actor: dict, primary: dict, radius: int, primary_
                 continue
             _, shield_abs, _ = _apply_damage(other, splash_dmg)
             extra += f" Splash hits {other['name']} for {splash_dmg}!"
+            event: dict[str, Any] = {
+                "key": "battle_log.splash_hit",
+                "name": other["name"],
+                "damage": splash_dmg,
+                "shield_abs": shield_abs or 0,
+                "defeated": not other["alive"],
+            }
             if shield_abs:
                 extra += f" ({shield_abs} absorbed)"
             if not other["alive"]:
                 extra += f" {other['name']} falls!"
-    return extra
+            events.append(event)
+    return extra, events
 
 
 def perform_action(
@@ -1095,7 +1296,11 @@ def perform_action(
             if (mx, my) not in reachable:
                 return {**state, "actors": actors}, "Invalid move destination"
             plen = _move_actor_path(state, actor, (mx, my))
-            log_msg = f"{actor['name']} moves to ({mx}, {my})."
+            log_msg = _structured_log(
+                "battle_log.move",
+                {"actor": actor["name"], "x": mx, "y": my},
+                f"{actor['name']} moves to ({mx}, {my}).",
+            )
 
         elif action == "guard":
             if actor["type"] != "player":
@@ -1110,7 +1315,11 @@ def perform_action(
             actor["guarding"] = True
             actor["guard_reduction"] = _guard_reduction(actor)
             pct = int(actor["guard_reduction"] * 100)
-            log_msg = f"{actor['name']} takes a guard stance (−{pct}% damage until next turn)."
+            log_msg = _structured_log(
+                "battle_log.guard",
+                {"actor": actor["name"], "pct": pct},
+                f"{actor['name']} takes a guard stance (−{pct}% damage until next turn).",
+            )
 
         elif action == "use_item":
             if actor["type"] != "player":
@@ -1131,7 +1340,16 @@ def perform_action(
                 return {**state, "actors": actors}, "Invalid target"
             target["current_hp"] = min(target["max_hp"], target["current_hp"] + heal)
             item["quantity"] -= 1
-            log_msg = f"{actor['name']} uses {item['name']} on {target['name']} for {heal} HP!"
+            log_msg = _structured_log(
+                "battle_log.use_item",
+                {
+                    "actor": actor["name"],
+                    "item": item["name"],
+                    "target": target["name"],
+                    "heal": heal,
+                },
+                f"{actor['name']} uses {item['name']} on {target['name']} for {heal} HP!",
+            )
 
         elif action in ("skill", "heal", "power_strike"):
             if actor["type"] != "player":
@@ -1193,7 +1411,11 @@ def perform_action(
             actor["guarding"] = True
             actor["guard_reduction"] = _guard_reduction(actor)
             pct = int(actor["guard_reduction"] * 100)
-            log_msg = f"{actor['name']} takes a guard stance (−{pct}% damage until next turn)."
+            log_msg = _structured_log(
+                "battle_log.guard",
+                {"actor": actor["name"], "pct": pct},
+                f"{actor['name']} takes a guard stance (−{pct}% damage until next turn).",
+            )
 
         elif action == "enemy_heal":
             if actor["type"] != "enemy":
@@ -1247,12 +1469,20 @@ def perform_action(
             mx, my = dest
             if _move_actor_path(state, actor, dest) < 0:
                 return {**state, "actors": actors}, "No move available"
-            log_msg = f"{actor['name']} moves toward the party ({mx}, {my})."
+            log_msg = _structured_log(
+                "battle_log.enemy_move",
+                {"actor": actor["name"], "x": mx, "y": my},
+                f"{actor['name']} moves toward the party ({mx}, {my}).",
+            )
 
         elif action == "enemy_wait":
             if actor["type"] != "enemy":
                 return {**state, "actors": actors}, "Not an enemy"
-            log_msg = f"{actor['name']} waits."
+            log_msg = _structured_log(
+                "battle_log.wait",
+                {"actor": actor["name"]},
+                f"{actor['name']} waits.",
+            )
 
         else:
             return {**state, "actors": actors}, f"Unknown action: {action}"
@@ -1260,15 +1490,23 @@ def perform_action(
         return {**state, "actors": actors}, str(exc)
 
     state["actors"] = actors
-    state["log"] = state.get("log", []) + [_log_entry(log_msg)]
+    _append_log(state, log_msg)
     state = _check_battle_end(state)
     if state["status"] == "active":
         state = _advance_turn(state)
         state = resolve_auto_turns(state)
         if state.get("status") == "active":
             next_name = _actor_name(state, state.get("active_actor_id"))
-            if state.get("log") and "turn." not in state["log"][-1]["message"]:
-                state["log"] = state.get("log", []) + [_log_entry(f"{next_name}'s turn.")]
+            last = state.get("log")[-1] if state.get("log") else None
+            if last and last.get("key") != "battle_log.turn":
+                _append_log(
+                    state,
+                    _structured_log(
+                        "battle_log.turn",
+                        {"actor": next_name},
+                        f"{next_name}'s turn.",
+                    ),
+                )
     return state, "ok"
 
 
@@ -1288,13 +1526,27 @@ def _enemy_has_melee_target(state: dict[str, Any], enemy: dict) -> bool:
 def _enemy_wait_turn(state: dict[str, Any], actor_id: str) -> dict[str, Any]:
     state = dict(state)
     name = _actor_name(state, actor_id)
-    state["log"] = state.get("log", []) + [_log_entry(f"{name} cannot reach anyone and waits.")]
+    _append_log(
+        state,
+        _structured_log(
+            "battle_log.cannot_reach",
+            {"actor": name},
+            f"{name} cannot reach anyone and waits.",
+        ),
+    )
     state = _check_battle_end(state)
     if state.get("status") == "active":
         state = _advance_turn(state)
         next_name = _actor_name(state, state.get("active_actor_id"))
         if next_name:
-            state["log"] = state.get("log", []) + [_log_entry(f"{next_name}'s turn.")]
+            _append_log(
+                state,
+                _structured_log(
+                    "battle_log.turn",
+                    {"actor": next_name},
+                    f"{next_name}'s turn.",
+                ),
+            )
     return state
 
 
@@ -1339,7 +1591,9 @@ def end_battle(state: dict[str, Any], reason: str = "master_ended") -> dict[str,
     state["status"] = "completed"
     state["end_reason"] = reason
     state["active_actor_id"] = None
-    state["log"] = state.get("log", []) + [_log_entry("The Master ended the battle.")]
+    state["log"] = state.get("log", []) + [
+        _log_entry("The Master ended the battle.", key="battle_log.master_ended")
+    ]
     return state
 
 

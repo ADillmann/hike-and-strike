@@ -4,7 +4,9 @@ import { api } from '../api/client';
 import { BattleGrid, GridActor, normalizeTerrainCells } from '../components/BattleGrid';
 import { Layout } from '../components/Layout';
 import { formatOutcomeSummary } from '../components/RewardsPanel';
+import { useLocale } from '../context/LocaleContext';
 import { useCampaignSocket } from '../hooks/useCampaignSocket';
+import { formatBattleLogMessage } from '../utils/battleLog';
 
 interface Actor {
   id: string;
@@ -61,7 +63,7 @@ interface BattleState {
   grid: { width: number; height: number; terrain_cells?: { x: number; y: number; type: 'wall' | 'water' | 'forest' }[]; blocked_cells?: { x: number; y: number }[] };
   actors: Actor[];
   active_actor_id: string | null;
-  log: { message: string; timestamp: string }[];
+  log: { message: string; timestamp: string; key?: string; params?: Record<string, unknown> }[];
   winner?: string;
   end_reason?: string;
   prebattle_pending?: string[];
@@ -122,6 +124,7 @@ export default function BattlePage() {
   const { id } = useParams();
   const battleId = Number(id);
   const navigate = useNavigate();
+  const { t } = useLocale();
   const [battle, setBattle] = useState<BattleResponse | null>(null);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<ActionMode>('idle');
@@ -132,7 +135,7 @@ export default function BattlePage() {
 
   const load = () => {
     if (!battleId) return;
-    api.get<BattleResponse>(`/battles/${battleId}`).then(setBattle).catch(() => setError('Battle not found'));
+    api.get<BattleResponse>(`/battles/${battleId}`).then(setBattle).catch(() => setError(t('battle.not_found')));
   };
 
   useEffect(() => { load(); }, [battleId]);
@@ -158,7 +161,7 @@ export default function BattlePage() {
       resetAction();
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Action failed');
+      setError(err instanceof Error ? err.message : t('battle.action_failed'));
       if (chargeMode) {
         setMode(mode === 'attack_charge' ? 'attack' : 'skill');
         setTargetId('');
@@ -166,7 +169,7 @@ export default function BattlePage() {
     }
   };
 
-  if (!battle) return <Layout title="Battle">{error || 'Loading...'}</Layout>;
+  if (!battle) return <Layout title={t('battle.title')}>{error || t('common.loading')}</Layout>;
 
   const state = battle.state;
   const grid = state.grid || { width: 5, height: 5, terrain_cells: [] };
@@ -206,7 +209,7 @@ export default function BattlePage() {
       setSelectedPrebattleActorId('');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Move failed');
+      setError(err instanceof Error ? err.message : t('battle.move_failed'));
     }
   };
 
@@ -309,25 +312,25 @@ export default function BattlePage() {
   const enemyActors = state.actors.filter((a) => a.type === 'enemy');
 
   return (
-    <Layout title="Battle">
+    <Layout title={t('battle.title')}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className={`rounded px-2 py-1 text-sm capitalize ${state.status === 'active' ? 'bg-green-900/50 text-green-300' : 'bg-dungeon-700'}`}>
-          {isPrebattle ? 'pre-battle positioning' : state.status}
+          {isPrebattle ? t('battle.prebattle_status') : state.status}
         </span>
         {canStartBattle && (
-          <button type="button" className="btn-primary text-sm" onClick={() => startBattle(false)}>Start Battle</button>
+          <button type="button" className="btn-primary text-sm" onClick={() => startBattle(false)}>{t('battle.start')}</button>
         )}
         {isPrebattle && battle.is_master && prebattlePending.length > 0 && (
           <button type="button" className="btn-secondary text-sm" onClick={() => startBattle(true)}>
-            Skip pre-battle &amp; start
+            {t('battle.skip_prebattle')}
           </button>
         )}
         {state.status === 'active' && battle.is_master && (
-          <button type="button" className="btn-danger text-sm" onClick={endBattle}>End Battle</button>
+          <button type="button" className="btn-danger text-sm" onClick={endBattle}>{t('battle.end')}</button>
         )}
         {state.status === 'completed' && (
           <button type="button" className="btn-secondary text-sm" onClick={() => navigate(battle.is_master ? `/organizer/campaigns/${battle.campaign_id}/control` : '/campaign')}>
-            Return
+            {t('battle.return')}
           </button>
         )}
       </div>
@@ -337,29 +340,29 @@ export default function BattlePage() {
       {isPrebattle && (
         <div className="mb-4 rounded border border-dungeon-600 p-3 space-y-2">
           <p className="text-sm text-dungeon-300">
-            High-initiative characters may move 1–2 cells before battle.
+            {t('battle.prebattle_intro')}
           </p>
           {prebattlePending.length > 0 ? (
             <>
               <p className="text-sm text-stone-400">
-                Waiting for reposition:
-                {' '}
-                {prebattlePending.map((id) => state.actors.find((a) => a.id === id)?.name || id).join(', ')}
+                {t('battle.waiting_reposition', {
+                  names: prebattlePending.map((aid) => state.actors.find((a) => a.id === aid)?.name || aid).join(', '),
+                })}
               </p>
               {battle.is_master && (
                 <div className="space-y-2">
-                  <p className="text-xs text-stone-500">Select a character, then click a highlighted cell to move them (or ask the player to do it on their device).</p>
+                  <p className="text-xs text-stone-500">{t('battle.prebattle_master_help')}</p>
                   <div className="flex flex-wrap gap-2">
-                    {prebattlePending.map((id) => {
-                      const actor = state.actors.find((a) => a.id === id);
+                    {prebattlePending.map((aid) => {
+                      const actor = state.actors.find((a) => a.id === aid);
                       return (
                         <button
-                          key={id}
+                          key={aid}
                           type="button"
-                          className={`btn-secondary text-xs ${prebattleActorId === id ? 'ring-1 ring-dungeon-400' : ''}`}
-                          onClick={() => setSelectedPrebattleActorId(id)}
+                          className={`btn-secondary text-xs ${prebattleActorId === aid ? 'ring-1 ring-dungeon-400' : ''}`}
+                          onClick={() => setSelectedPrebattleActorId(aid)}
                         >
-                          Move {actor?.name || id}
+                          {t('battle.move_named', { name: actor?.name || aid })}
                         </button>
                       );
                     })}
@@ -367,14 +370,14 @@ export default function BattlePage() {
                 </div>
               )}
               {!battle.is_master && myActor && prebattlePending.includes(myActor.id) && (
-                <p className="text-sm text-green-300">Click a highlighted cell on the grid to reposition your character.</p>
+                <p className="text-sm text-green-300">{t('battle.prebattle_your_move')}</p>
               )}
               {!battle.is_master && myActor && !prebattlePending.includes(myActor.id) && (
-                <p className="text-sm text-stone-500">Waiting for teammates with high initiative to reposition…</p>
+                <p className="text-sm text-stone-500">{t('battle.prebattle_waiting')}</p>
               )}
             </>
           ) : (
-            <p className="text-sm text-green-300">Pre-battle moves complete. Master can start the battle.</p>
+            <p className="text-sm text-green-300">{t('battle.prebattle_ready')}</p>
           )}
         </div>
       )}
@@ -382,14 +385,18 @@ export default function BattlePage() {
       {state.status === 'active' && active && (
         <div className="card mb-4 border-dungeon-500">
           <p className="text-lg font-semibold text-dungeon-300">
-            {isMyTurn ? 'Your turn!' : active.type === 'enemy' ? `${active.name} is acting…` : `${active.name}'s turn`}
+            {isMyTurn
+              ? t('battle.your_turn')
+              : active.type === 'enemy'
+                ? t('battle.enemy_acting', { name: active.name })
+                : t('battle.turn_named', { name: active.name })}
           </p>
         </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="card lg:col-span-2 space-y-4">
-          <h2 className="font-semibold text-dungeon-300">Battlefield</h2>
+          <h2 className="font-semibold text-dungeon-300">{t('battle.battlefield')}</h2>
           <BattleGrid
             width={grid.width}
             height={grid.height}
@@ -404,17 +411,17 @@ export default function BattlePage() {
 
           {isMyTurn && state.status === 'active' && (
             <div className="space-y-2 border-t border-dungeon-700 pt-4">
-              <h3 className="font-medium text-dungeon-300">Actions</h3>
+              <h3 className="font-medium text-dungeon-300">{t('battle.actions')}</h3>
               {mode === 'idle' && (
                 <div className="flex flex-wrap gap-2">
                   {canMelee && (
-                    <button type="button" className="btn-primary" onClick={() => setMode('attack')}>Melee Attack</button>
+                    <button type="button" className="btn-primary" onClick={() => setMode('attack')}>{t('battle.melee_attack')}</button>
                   )}
                   {canRanged && (
-                    <button type="button" className="btn-primary" onClick={() => setMode('ranged_attack')}>Ranged Attack</button>
+                    <button type="button" className="btn-primary" onClick={() => setMode('ranged_attack')}>{t('battle.ranged_attack')}</button>
                   )}
-                  <button type="button" className="btn-secondary" onClick={() => setMode('move')}>Move (6)</button>
-                  <button type="button" className="btn-secondary" onClick={() => setMode('guard')}>Guard</button>
+                  <button type="button" className="btn-secondary" onClick={() => setMode('move')}>{t('battle.move')}</button>
+                  <button type="button" className="btn-secondary" onClick={() => setMode('guard')}>{t('battle.guard')}</button>
                   {myActor?.consumables?.filter((c) => c.quantity > 0 && c.heal > 0).map((c) => (
                     <button
                       key={c.inventory_item_id}
@@ -471,23 +478,23 @@ export default function BattlePage() {
               )}
               {mode === 'attack' && hints && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Select melee target:</p>
+                  <p className="text-sm text-stone-400">{t('battle.select_melee_target')}</p>
                   <div className="flex flex-wrap gap-2">
-                    {hints.melee_targets.map((t) => {
-                      const enemy = state.actors.find((a) => a.id === t.id);
+                    {hints.melee_targets.map((mt) => {
+                      const enemy = state.actors.find((a) => a.id === mt.id);
                       return (
-                        <button key={t.id} type="button" className="btn-primary text-xs" onClick={() => startAttack(t.id)}>
-                          {enemy?.name}{t.charge_cells.length ? ' (charge)' : ''}
+                        <button key={mt.id} type="button" className="btn-primary text-xs" onClick={() => startAttack(mt.id)}>
+                          {enemy?.name}{mt.charge_cells.length ? t('battle.charge_suffix') : ''}
                         </button>
                       );
                     })}
                   </div>
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode === 'ranged_attack' && hints && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Blue = range. Green = valid shot. Select target:</p>
+                  <p className="text-sm text-stone-400">{t('battle.select_ranged_help')}</p>
                   <div className="flex flex-wrap gap-2">
                     {hints.range_targets.map((tid) => (
                       <button
@@ -500,37 +507,39 @@ export default function BattlePage() {
                           target_id: tid,
                         })}
                       >
-                        Shoot {state.actors.find((a) => a.id === tid)?.name}
+                        {t('battle.shoot_named', { name: state.actors.find((a) => a.id === tid)?.name || '' })}
                       </button>
                     ))}
                   </div>
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode === 'attack_charge' && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge.</p>
+                  <p className="text-sm text-stone-400">{t('battle.charge_help')}</p>
                   {highlightCells.length === 0 && (
-                    <p className="text-sm text-amber-400">No reachable charge path — cancel and try Move or another target.</p>
+                    <p className="text-sm text-amber-400">{t('battle.no_charge_path')}</p>
                   )}
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode === 'skill_charge' && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Click a highlighted cell beside your target to charge with your skill.</p>
+                  <p className="text-sm text-stone-400">{t('battle.charge_skill_help')}</p>
                   {highlightCells.length === 0 && (
-                    <p className="text-sm text-amber-400">No reachable charge path — cancel and try Move or another target.</p>
+                    <p className="text-sm text-amber-400">{t('battle.no_charge_path')}</p>
                   )}
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {(mode === 'move' || mode === 'guard') && (
-                <p className="text-sm text-stone-400">Click a highlighted cell to {mode === 'move' ? 'move' : 'guard'}.</p>
+                <p className="text-sm text-stone-400">
+                  {t('battle.click_to_act', { action: mode === 'move' ? t('battle.act_move') : t('battle.act_guard') })}
+                </p>
               )}
               {mode === 'ally_skill' && skillId && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Select ally to target:</p>
+                  <p className="text-sm text-stone-400">{t('battle.select_ally_target')}</p>
                   <div className="flex flex-wrap gap-2">
                     {(skillTargetEntry(hints, skillId)?.allies || hints?.ally_targets || []).map((ally) => (
                       <button
@@ -545,16 +554,16 @@ export default function BattlePage() {
                         })}
                       >
                         {ally.name} ({ally.current_hp}/{ally.max_hp})
-                        {ally.id === state.active_actor_id ? ' — you' : ''}
+                        {ally.id === state.active_actor_id ? t('skills.you_suffix') : ''}
                       </button>
                     ))}
                   </div>
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode === 'item' && pendingItemId && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Select ally to heal:</p>
+                  <p className="text-sm text-stone-400">{t('battle.select_ally_heal')}</p>
                   <div className="flex flex-wrap gap-2">
                     {(hints?.ally_targets || []).map((ally) => (
                       <button
@@ -569,16 +578,16 @@ export default function BattlePage() {
                         })}
                       >
                         {ally.name} ({ally.current_hp}/{ally.max_hp})
-                        {ally.id === state.active_actor_id ? ' — you' : ''}
+                        {ally.id === state.active_actor_id ? t('skills.you_suffix') : ''}
                       </button>
                     ))}
                   </div>
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode === 'skill' && skillId && (
                 <div className="space-y-2">
-                  <p className="text-sm text-stone-400">Select target:</p>
+                  <p className="text-sm text-stone-400">{t('battle.select_target')}</p>
                   {(() => {
                     const skill = myActor?.skills?.find((s) => s.id === skillId);
                     const eff = normalizeEffect(skill?.effect_type);
@@ -599,24 +608,24 @@ export default function BattlePage() {
                     const meleeTargets = (targets?.enemies as { id: string; charge_cells: { x: number; y: number }[] }[] | undefined)
                       || hints?.melee_targets
                       || [];
-                    return meleeTargets.map((t) => (
-                      <button key={t.id} type="button" className="btn-primary mr-2 text-xs" onClick={() => {
-                        if (t.charge_cells.length) {
-                          setTargetId(t.id);
+                    return meleeTargets.map((mt) => (
+                      <button key={mt.id} type="button" className="btn-primary mr-2 text-xs" onClick={() => {
+                        if (mt.charge_cells.length) {
+                          setTargetId(mt.id);
                           setMode('skill_charge');
                         } else {
-                          postAction({ action: 'skill', actor_id: state.active_actor_id, target_id: t.id, skill_id: skillId });
+                          postAction({ action: 'skill', actor_id: state.active_actor_id, target_id: mt.id, skill_id: skillId });
                         }
                       }}>
-                        {state.actors.find((a) => a.id === t.id)?.name}
+                        {state.actors.find((a) => a.id === mt.id)?.name}
                       </button>
                     ));
                   })()}
-                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                  <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
                 </div>
               )}
               {mode !== 'idle' && mode !== 'attack' && mode !== 'ranged_attack' && mode !== 'attack_charge' && mode !== 'skill_charge' && mode !== 'ally_skill' && mode !== 'item' && (
-                <button type="button" className="btn-secondary text-xs" onClick={resetAction}>Cancel</button>
+                <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
               )}
             </div>
           )}
@@ -624,7 +633,7 @@ export default function BattlePage() {
 
         <aside className="space-y-4">
           <section className="card">
-            <h2 className="mb-2 font-semibold text-dungeon-300">Turn order</h2>
+            <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.turn_order')}</h2>
             <ul className="space-y-1 text-sm">
               {sortedByInitiative.map((a) => (
                 <li key={a.id} className={a.id === state.active_actor_id ? 'text-dungeon-300 font-medium' : 'text-stone-500'}>
@@ -636,7 +645,7 @@ export default function BattlePage() {
 
           {partyActors.length > 0 && (
             <section className="card">
-              <h2 className="mb-2 font-semibold text-dungeon-300">Party</h2>
+              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.party')}</h2>
               <div className="max-h-48 space-y-2 overflow-y-auto">
                   {partyActors.map((a) => (
                     <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp />
@@ -647,7 +656,7 @@ export default function BattlePage() {
 
           {enemyActors.length > 0 && (
             <section className="card">
-              <h2 className="mb-2 font-semibold text-dungeon-300">Enemies</h2>
+              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.enemies')}</h2>
               <div className="max-h-48 space-y-2 overflow-y-auto">
                   {enemyActors.map((a) => (
                     <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp={battle.is_master || !a.hp_hidden} />
@@ -657,18 +666,24 @@ export default function BattlePage() {
           )}
 
           <section className="card">
-            <h2 className="mb-2 font-semibold text-dungeon-300">Battle Log</h2>
+            <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.battle_log')}</h2>
             <div className="max-h-48 space-y-1 overflow-y-auto text-sm">
               {[...(state.log || [])].reverse().map((entry, i) => (
-                <p key={i} className="text-stone-400">{entry.message}</p>
+                <p key={i} className="text-stone-400">{formatBattleLogMessage(entry, t)}</p>
               ))}
             </div>
             {state.status === 'completed' && (
               <div className="mt-3 text-dungeon-300">
-                <p>{state.winner === 'party' ? 'Victory!' : state.winner === 'enemies' ? 'Defeat...' : 'Battle ended.'}</p>
+                <p>
+                  {state.winner === 'party'
+                    ? t('battle.victory')
+                    : state.winner === 'enemies'
+                      ? t('battle.defeat')
+                      : t('battle.ended')}
+                </p>
                 {state.winner === 'party' && state.victory_rewards && formatOutcomeSummary(state.victory_rewards).length > 0 && (
                   <div className="mt-2 rounded border border-green-900/50 bg-green-950/30 p-2 text-sm">
-                    <p className="text-green-400">Victory rewards applied</p>
+                    <p className="text-green-400">{t('battle.victory_rewards')}</p>
                     <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
                       {formatOutcomeSummary(state.victory_rewards).map((line) => (
                         <li key={line}>{line}</li>
@@ -678,7 +693,7 @@ export default function BattlePage() {
                 )}
                 {state.winner === 'enemies' && state.defeat_punishments && formatOutcomeSummary(state.defeat_punishments).length > 0 && (
                   <div className="mt-2 rounded border border-red-900/50 bg-red-950/30 p-2 text-sm">
-                    <p className="text-red-400">Defeat consequences applied</p>
+                    <p className="text-red-400">{t('battle.defeat_consequences')}</p>
                     <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
                       {formatOutcomeSummary(state.defeat_punishments).map((line) => (
                         <li key={line}>{line}</li>
@@ -696,18 +711,19 @@ export default function BattlePage() {
 }
 
 function ActorCard({ actor, isActive, isMe, hideType, showHp = true }: { actor: Actor; isActive?: boolean; isMe?: boolean; hideType?: boolean; showHp?: boolean }) {
+  const { t } = useLocale();
   return (
     <div className={`rounded border p-2 text-sm ${isActive ? 'border-dungeon-400 bg-dungeon-800' : 'border-dungeon-700'} ${!actor.alive ? 'opacity-50' : ''}`}>
       <div className="flex justify-between">
-        <span className="font-medium">{actor.name}{isMe ? ' (you)' : ''}</span>
+        <span className="font-medium">{actor.name}{isMe ? t('skills.you_suffix') : ''}</span>
         {!hideType && <span className="text-xs text-stone-500">{actor.type}</span>}
       </div>
-      <p>HP {showHp ? `${actor.current_hp}/${actor.max_hp}` : '?'}</p>
-      {showHp && (actor.shield_hp ?? 0) > 0 && <p className="text-xs text-dungeon-300">Shield {actor.shield_hp}</p>}
+      <p>{t('battle.hp_label', { value: showHp ? `${actor.current_hp}/${actor.max_hp}` : '?' })}</p>
+      {showHp && (actor.shield_hp ?? 0) > 0 && <p className="text-xs text-dungeon-300">{t('battle.shield', { n: actor.shield_hp ?? 0 })}</p>}
       {actor.guarding && (
-        <p className="text-xs text-blue-300">Guarding (−{Math.round((actor.guard_reduction || 0.3) * 100)}% dmg)</p>
+        <p className="text-xs text-blue-300">{t('battle.guarding', { pct: Math.round((actor.guard_reduction || 0.3) * 100) })}</p>
       )}
-      {!actor.alive && <p className="text-xs text-red-400">Down</p>}
+      {!actor.alive && <p className="text-xs text-red-400">{t('battle.down')}</p>}
     </div>
   );
 }
