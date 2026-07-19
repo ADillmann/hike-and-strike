@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { BattleGrid, GridActor, normalizeTerrainCells } from '../components/BattleGrid';
 import { Layout } from '../components/Layout';
 import { formatOutcomeSummary } from '../components/RewardsPanel';
+import { TurnTimeline } from '../components/TurnTimeline';
 import { useLocale } from '../context/LocaleContext';
 import { useCampaignSocket } from '../hooks/useCampaignSocket';
 import { formatBattleLogMessage } from '../utils/battleLog';
@@ -174,7 +175,6 @@ export default function BattlePage() {
   const state = battle.state;
   const grid = state.grid || { width: 5, height: 5, terrain_cells: [] };
   const terrainCells = normalizeTerrainCells(grid);
-  const active = state.actors.find((a) => a.id === state.active_actor_id);
   const myActor = state.actors.find((a) => a.character_id === battle.my_character_id);
   const isMyTurn = myActor && state.active_actor_id === myActor.id;
   const hints = battle.action_hints;
@@ -382,20 +382,12 @@ export default function BattlePage() {
         </div>
       )}
 
-      {state.status === 'active' && active && (
-        <div className="card mb-4 border-dungeon-500">
-          <p className="text-lg font-semibold text-dungeon-300">
-            {isMyTurn
-              ? t('battle.your_turn')
-              : active.type === 'enemy'
-                ? t('battle.enemy_acting', { name: active.name })
-                : t('battle.turn_named', { name: active.name })}
-          </p>
-        </div>
+      {state.status === 'active' && (
+        <TurnTimeline actors={sortedByInitiative} activeActorId={state.active_actor_id} />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <section className="card lg:col-span-2 space-y-4">
+      <div className="mb-4 grid gap-4 lg:grid-cols-3">
+        <section className="card space-y-4 lg:col-span-2">
           <h2 className="font-semibold text-dungeon-300">{t('battle.battlefield')}</h2>
           <BattleGrid
             width={grid.width}
@@ -408,9 +400,35 @@ export default function BattlePage() {
             activeActorId={state.active_actor_id}
             onCellClick={onCellClick}
           />
+        </section>
 
-          {isMyTurn && state.status === 'active' && (
-            <div className="space-y-2 border-t border-dungeon-700 pt-4">
+        <aside className="space-y-4">
+          {partyActors.length > 0 && (
+            <section className="card">
+              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.party')}</h2>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {partyActors.map((a) => (
+                  <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {enemyActors.length > 0 && (
+            <section className="card">
+              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.enemies')}</h2>
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {enemyActors.map((a) => (
+                  <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp={battle.is_master || !a.hp_hidden} />
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
+      </div>
+
+      {isMyTurn && state.status === 'active' && (
+            <div className="card mb-4 space-y-2">
               <h3 className="font-medium text-dungeon-300">{t('battle.actions')}</h3>
               {mode === 'idle' && (
                 <div className="flex flex-wrap gap-2">
@@ -628,84 +646,47 @@ export default function BattlePage() {
                 <button type="button" className="btn-secondary text-xs" onClick={resetAction}>{t('battle.cancel')}</button>
               )}
             </div>
-          )}
-        </section>
+      )}
 
-        <aside className="space-y-4">
-          <section className="card">
-            <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.turn_order')}</h2>
-            <ul className="space-y-1 text-sm">
-              {sortedByInitiative.map((a) => (
-                <li key={a.id} className={a.id === state.active_actor_id ? 'text-dungeon-300 font-medium' : 'text-stone-500'}>
-                  {a.name} ({a.initiative_value.toFixed(2)})
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          {partyActors.length > 0 && (
-            <section className="card">
-              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.party')}</h2>
-              <div className="max-h-48 space-y-2 overflow-y-auto">
-                  {partyActors.map((a) => (
-                    <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp />
+      <section className="card">
+        <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.battle_log')}</h2>
+        <div className="max-h-48 space-y-1 overflow-y-auto text-sm">
+          {[...(state.log || [])].reverse().map((entry, i) => (
+            <p key={i} className="text-stone-400">{formatBattleLogMessage(entry, t)}</p>
+          ))}
+        </div>
+        {state.status === 'completed' && (
+          <div className="mt-3 text-dungeon-300">
+            <p>
+              {state.winner === 'party'
+                ? t('battle.victory')
+                : state.winner === 'enemies'
+                  ? t('battle.defeat')
+                  : t('battle.ended')}
+            </p>
+            {state.winner === 'party' && state.victory_rewards && formatOutcomeSummary(state.victory_rewards).length > 0 && (
+              <div className="mt-2 rounded border border-green-900/50 bg-green-950/30 p-2 text-sm">
+                <p className="text-green-400">{t('battle.victory_rewards')}</p>
+                <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
+                  {formatOutcomeSummary(state.victory_rewards).map((line) => (
+                    <li key={line}>{line}</li>
                   ))}
-              </div>
-            </section>
-          )}
-
-          {enemyActors.length > 0 && (
-            <section className="card">
-              <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.enemies')}</h2>
-              <div className="max-h-48 space-y-2 overflow-y-auto">
-                  {enemyActors.map((a) => (
-                    <ActorCard key={a.id} actor={a} isActive={a.id === state.active_actor_id} isMe={a.character_id === battle.my_character_id} hideType showHp={battle.is_master || !a.hp_hidden} />
-                  ))}
-              </div>
-            </section>
-          )}
-
-          <section className="card">
-            <h2 className="mb-2 font-semibold text-dungeon-300">{t('battle.battle_log')}</h2>
-            <div className="max-h-48 space-y-1 overflow-y-auto text-sm">
-              {[...(state.log || [])].reverse().map((entry, i) => (
-                <p key={i} className="text-stone-400">{formatBattleLogMessage(entry, t)}</p>
-              ))}
-            </div>
-            {state.status === 'completed' && (
-              <div className="mt-3 text-dungeon-300">
-                <p>
-                  {state.winner === 'party'
-                    ? t('battle.victory')
-                    : state.winner === 'enemies'
-                      ? t('battle.defeat')
-                      : t('battle.ended')}
-                </p>
-                {state.winner === 'party' && state.victory_rewards && formatOutcomeSummary(state.victory_rewards).length > 0 && (
-                  <div className="mt-2 rounded border border-green-900/50 bg-green-950/30 p-2 text-sm">
-                    <p className="text-green-400">{t('battle.victory_rewards')}</p>
-                    <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
-                      {formatOutcomeSummary(state.victory_rewards).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {state.winner === 'enemies' && state.defeat_punishments && formatOutcomeSummary(state.defeat_punishments).length > 0 && (
-                  <div className="mt-2 rounded border border-red-900/50 bg-red-950/30 p-2 text-sm">
-                    <p className="text-red-400">{t('battle.defeat_consequences')}</p>
-                    <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
-                      {formatOutcomeSummary(state.defeat_punishments).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                </ul>
               </div>
             )}
-          </section>
-        </aside>
-      </div>
+            {state.winner === 'enemies' && state.defeat_punishments && formatOutcomeSummary(state.defeat_punishments).length > 0 && (
+              <div className="mt-2 rounded border border-red-900/50 bg-red-950/30 p-2 text-sm">
+                <p className="text-red-400">{t('battle.defeat_consequences')}</p>
+                <ul className="mt-1 list-inside list-disc text-xs text-stone-400">
+                  {formatOutcomeSummary(state.defeat_punishments).map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
     </Layout>
   );
 }

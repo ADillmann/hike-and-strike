@@ -15,10 +15,21 @@ type SkillItem = Character['skills'][number] & {
   effect_params?: Record<string, string | number>;
 };
 
+type SlotSection = 'melee' | 'range' | 'support';
+
 function normalizeEffect(type?: string): string {
   if (type === 'power_strike') return 'melee';
   if (type === 'arcane_bolt') return 'range';
   return type || 'none';
+}
+
+function skillSectionKind(skill: SkillItem): SlotSection | null {
+  if (skill.slot_kind === 'melee' || skill.slot_kind === 'range' || skill.slot_kind === 'support') {
+    return skill.slot_kind;
+  }
+  const effect = normalizeEffect(skill.effect_type);
+  if (effect === 'melee' || effect === 'range' || effect === 'support') return effect;
+  return null;
 }
 
 function canUseOutsideBattle(skill: SkillItem): boolean {
@@ -76,6 +87,56 @@ export default function SkillsPage() {
     ? `Melee ${character.skill_slots.melee?.used ?? 0}/${character.skill_slots.melee?.max ?? 0} · Range ${character.skill_slots.range?.used ?? 0}/${character.skill_slots.range?.max ?? 0} · Support ${character.skill_slots.support?.used ?? 0}/${character.skill_slots.support?.max ?? 0}`
     : null;
 
+  const sections: { kind: SlotSection; titleKey: string; skills: SkillItem[] }[] = [
+    { kind: 'melee', titleKey: 'skills.section_melee', skills: [] },
+    { kind: 'range', titleKey: 'skills.section_range', skills: [] },
+    { kind: 'support', titleKey: 'skills.section_support', skills: [] },
+  ];
+  for (const s of character.skills) {
+    const skill = s as SkillItem;
+    const kind = skillSectionKind(skill);
+    if (!kind) continue;
+    sections.find((sec) => sec.kind === kind)?.skills.push(skill);
+  }
+  const visibleSections = sections.filter((sec) => sec.skills.length > 0);
+
+  const renderSkillCard = (skill: SkillItem) => {
+    const usable = canUseOutsideBattle(skill) && skill.uses_remaining > 0;
+    const slotLabel = skill.slot_kind
+      ? t('skills.slot_suffix', { slot: t(`slots.${skill.slot_kind}`) })
+      : '';
+    return (
+      <div key={skill.id} className="rounded border border-dungeon-600 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="font-medium">{skill.name}</div>
+            <p className="text-xs capitalize text-stone-500">
+              {normalizeEffect(skill.effect_type)}
+              {slotLabel ? ` · ${slotLabel}` : ''}
+            </p>
+            {skill.description && <p className="mt-1 text-sm text-stone-500">{skill.description}</p>}
+            <p className="mt-1 text-xs text-stone-500">{useSkillHint(skill)}</p>
+          </div>
+          <span className="shrink-0 text-dungeon-300">
+            {t('skills.uses', { remaining: skill.uses_remaining, max: skill.max_uses_per_rest })}
+          </span>
+        </div>
+        {usable && (
+          <button
+            type="button"
+            className="btn-primary mt-2 text-xs"
+            onClick={() => {
+              setTargetId(party[0]?.character_id || character.id);
+              setPendingSkill(skill);
+            }}
+          >
+            {t('skills.use_skill')}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Layout title={t('skills.title')}>
       {error && <p className="mb-3 text-red-400">{error}</p>}
@@ -85,47 +146,16 @@ export default function SkillsPage() {
           <span className="ml-2 text-xs text-stone-500">{t('skills.slots_hint')}</span>
         </p>
       )}
-      <div className="card space-y-3">
+      <div className="card space-y-6">
         {character.skills.length === 0 && (
           <p className="text-stone-500">{t('skills.empty')}</p>
         )}
-        {character.skills.map((s) => {
-          const skill = s as SkillItem;
-          const usable = canUseOutsideBattle(skill) && skill.uses_remaining > 0;
-          const slotLabel = skill.slot_kind
-            ? t('skills.slot_suffix', { slot: t(`slots.${skill.slot_kind}`) })
-            : '';
-          return (
-            <div key={skill.id} className="rounded border border-dungeon-600 p-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <div className="font-medium">{skill.name}</div>
-                  <p className="text-xs capitalize text-stone-500">
-                    {normalizeEffect(skill.effect_type)}
-                    {slotLabel ? ` · ${slotLabel}` : ''}
-                  </p>
-                  {skill.description && <p className="mt-1 text-sm text-stone-500">{skill.description}</p>}
-                  <p className="mt-1 text-xs text-stone-500">{useSkillHint(skill)}</p>
-                </div>
-                <span className="shrink-0 text-dungeon-300">
-                  {t('skills.uses', { remaining: skill.uses_remaining, max: skill.max_uses_per_rest })}
-                </span>
-              </div>
-              {usable && (
-                <button
-                  type="button"
-                  className="btn-primary mt-2 text-xs"
-                  onClick={() => {
-                    setTargetId(party[0]?.character_id || character.id);
-                    setPendingSkill(skill);
-                  }}
-                >
-                  {t('skills.use_skill')}
-                </button>
-              )}
-            </div>
-          );
-        })}
+        {visibleSections.map((sec) => (
+          <section key={sec.kind} className="space-y-3">
+            <h2 className="font-semibold text-dungeon-300">{t(sec.titleKey)}</h2>
+            {sec.skills.map(renderSkillCard)}
+          </section>
+        ))}
         <p className="text-sm text-stone-500">{t('skills.refill_help')}</p>
       </div>
 

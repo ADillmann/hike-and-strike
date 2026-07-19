@@ -119,6 +119,9 @@
     "refill_help": "Uses refill after rest at bonfire or house events. New slots appear when STR/DEX/INT/CHA rise.",
     "target": "Target",
     "you_suffix": " (you)",
+    "section_melee": "Melee",
+    "section_range": "Range",
+    "section_support": "Support",
     "err_failed": "Could not use skill"
   },
   "inventory": {
@@ -231,6 +234,7 @@
     "guard": "Guard",
     "cancel": "Cancel",
     "turn_order": "Turn order",
+    "timeline": "Turn order",
     "party": "Party",
     "enemies": "Enemies",
     "battle_log": "Battle Log",

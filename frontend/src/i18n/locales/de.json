@@ -119,6 +119,9 @@
     "refill_help": "Nutzungen füllen sich nach einer Rast an Lagerfeuer oder Haus wieder. Neue Plätze erscheinen, wenn STÄ/GES/INT/CHA steigen.",
     "target": "Ziel",
     "you_suffix": " (du)",
+    "section_melee": "Nahkampf",
+    "section_range": "Fernkampf",
+    "section_support": "Unterstützung",
     "err_failed": "Fähigkeit konnte nicht genutzt werden"
   },
   "inventory": {
@@ -231,6 +234,7 @@
     "guard": "Deckung",
     "cancel": "Abbrechen",
     "turn_order": "Zugreihenfolge",
+    "timeline": "Zugreihenfolge",
     "party": "Gruppe",
     "enemies": "Gegner",
     "battle_log": "Kampflog",
