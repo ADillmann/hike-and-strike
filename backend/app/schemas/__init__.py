@@ -399,6 +399,11 @@ class CampaignCreate(BaseModel):
     name: str
     group_id: int
     nodes: list[CampaignNodeCreate] = Field(default_factory=list)
+    layout_theme: str = "default"
+
+
+class CampaignLayoutThemeUpdate(BaseModel):
+    layout_theme: str
 
 
 class CampaignOut(BaseModel):
@@ -407,6 +412,7 @@ class CampaignOut(BaseModel):
     group_id: int
     status: str
     current_node_id: int | None
+    layout_theme: str = "default"
     nodes: list[dict[str, Any]] = []
 
     class Config:

@@ -37,6 +37,14 @@
     "range": "Fernkampf",
     "support": "Unterstützung"
   },
+  "layout": {
+    "label": "Spieler-Layout",
+    "default": "Standard",
+    "fantasy": "Fantasy",
+    "cyberpunk": "Cyberpunk",
+    "knight": "Ritter",
+    "help": "Visuelles Thema für Spielerseiten in dieser Kampagne."
+  },
   "login": {
     "tagline": "Betritt den Kerker",
     "setup_tagline": "Erstelle dein Meister-Konto",

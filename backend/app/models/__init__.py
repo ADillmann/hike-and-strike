@@ -233,6 +233,7 @@ class Campaign(Base):
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"))
     master_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(32), default="draft")
+    layout_theme: Mapped[str] = mapped_column(String(32), default="default")
     current_node_id: Mapped[int | None] = mapped_column(ForeignKey("campaign_event_nodes.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

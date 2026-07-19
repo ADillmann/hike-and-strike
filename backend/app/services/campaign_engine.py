@@ -76,6 +76,7 @@ def campaign_state_payload(db: Session, campaign: Campaign) -> dict[str, Any]:
         "campaign_id": campaign.id,
         "name": campaign.name,
         "status": campaign.status,
+        "layout_theme": getattr(campaign, "layout_theme", None) or "default",
         "current_node": current,
         "party": [_character_snapshot(c) for c in party],
     }

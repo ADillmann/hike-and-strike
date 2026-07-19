@@ -156,6 +156,12 @@ def apply_schema_patches(engine: Engine) -> None:
     )
     _add_column_if_missing(engine, "skills", "slot_kind", "slot_kind VARCHAR(16)")
     _backfill_skill_slot_kinds(engine)
+    _add_column_if_missing(
+        engine,
+        "campaigns",
+        "layout_theme",
+        "layout_theme VARCHAR(32) DEFAULT 'default'",
+    )
     _reconcile_all_character_stat_points(engine)
 
 

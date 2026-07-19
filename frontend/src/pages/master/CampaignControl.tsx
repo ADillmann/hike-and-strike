@@ -9,11 +9,14 @@ import { DiceBox } from '../../components/DiceBox';
 import { RewardsPanel, RewardsPayload, EffectTemplate } from '../../components/RewardsPanel';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 import { ITEM_TYPE_FILTER_OPTIONS, ItemTypeFilter } from '../../utils/itemTypes';
+import { useLocale } from '../../context/LocaleContext';
+import type { LayoutTheme } from '../../context/LayoutThemeContext';
 
 interface CampaignState {
   campaign_id: number;
   name: string;
   status: string;
+  layout_theme?: LayoutTheme;
   current_node: {
     node_id: number;
     event: { name: string; description: string; event_type: string; images: string[] };
@@ -67,6 +70,7 @@ function outcomeBadgeClass(outcome: string): string {
 export default function CampaignControlPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { t } = useLocale();
   const campaignId = Number(id);
   const [state, setState] = useState<CampaignState | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -184,6 +188,11 @@ export default function CampaignControlPage() {
     load();
   };
 
+  const updateLayoutTheme = async (theme: LayoutTheme) => {
+    await api.patch(`/campaigns/${campaignId}/layout-theme`, { layout_theme: theme });
+    load();
+  };
+
   useEffect(() => {
     setInsertPosition(nodes.length + 1);
   }, [nodes.length]);
@@ -227,7 +236,7 @@ export default function CampaignControlPage() {
 
   return (
     <Layout title={`Campaign: ${state.name}`}>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="rounded bg-dungeon-700 px-2 py-1 text-sm capitalize">{state.status}</span>
         {state.status === 'active' && (
           <>
@@ -238,6 +247,19 @@ export default function CampaignControlPage() {
         {state.status === 'paused' && (
           <button className="btn-primary text-sm" onClick={resumeCampaign}>Resume</button>
         )}
+        <label className="ml-auto flex items-center gap-2 text-sm text-stone-400">
+          <span>{t('layout.label')}</span>
+          <select
+            className="input w-auto py-1"
+            value={state.layout_theme || 'default'}
+            onChange={(e) => updateLayoutTheme(e.target.value as LayoutTheme)}
+          >
+            <option value="default">{t('layout.default')}</option>
+            <option value="fantasy">{t('layout.fantasy')}</option>
+            <option value="cyberpunk">{t('layout.cyberpunk')}</option>
+            <option value="knight">{t('layout.knight')}</option>
+          </select>
+        </label>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

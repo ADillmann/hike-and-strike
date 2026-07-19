@@ -37,6 +37,14 @@
     "range": "range",
     "support": "support"
   },
+  "layout": {
+    "label": "Player layout",
+    "default": "Default",
+    "fantasy": "Fantasy",
+    "cyberpunk": "Cyberpunk",
+    "knight": "Knight",
+    "help": "Visual theme for player pages in this campaign."
+  },
   "login": {
     "tagline": "Enter the dungeon",
     "setup_tagline": "Create your Master account",

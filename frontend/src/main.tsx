@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { LayoutThemeProvider } from './context/LayoutThemeContext';
 import { LocaleProvider } from './context/LocaleContext';
 import './index.css';
 
@@ -11,7 +12,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <LocaleProvider>
         <AuthProvider>
-          <App />
+          <LayoutThemeProvider>
+            <App />
+          </LayoutThemeProvider>
         </AuthProvider>
       </LocaleProvider>
     </BrowserRouter>

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
+import type { LayoutTheme } from '../../context/LayoutThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 
 interface Group { id: number; name: string }
 interface EventTemplate { id: number; name: string; event_type: string }
@@ -10,15 +12,18 @@ interface Campaign {
   name: string;
   group_id: number;
   status: string;
+  layout_theme?: LayoutTheme;
   nodes: { id: number; sort_order: number; event_template_id: number; event_name: string; label: string | null; event_type?: string }[];
 }
 
 export default function CampaignsPage() {
+  const { t } = useLocale();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [events, setEvents] = useState<EventTemplate[]>([]);
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState(0);
+  const [layoutTheme, setLayoutTheme] = useState<LayoutTheme>('default');
   const [nodeEvents, setNodeEvents] = useState<number[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editNodes, setEditNodes] = useState<number[]>([]);
@@ -35,9 +40,15 @@ export default function CampaignsPage() {
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     const nodes = nodeEvents.map((event_template_id, i) => ({ event_template_id, sort_order: i }));
-    await api.post('/campaigns', { name, group_id: groupId, nodes });
+    await api.post('/campaigns', { name, group_id: groupId, nodes, layout_theme: layoutTheme });
     setName('');
     setNodeEvents([]);
+    setLayoutTheme('default');
+    load();
+  };
+
+  const updateTheme = async (id: number, theme: LayoutTheme) => {
+    await api.patch(`/campaigns/${id}/layout-theme`, { layout_theme: theme });
     load();
   };
 
@@ -87,6 +98,21 @@ export default function CampaignsPage() {
           <select className="input" value={groupId} onChange={(e) => setGroupId(+e.target.value)}>
             {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
+          <div>
+            <label className="label" htmlFor="new-layout-theme">{t('layout.label')}</label>
+            <select
+              id="new-layout-theme"
+              className="input"
+              value={layoutTheme}
+              onChange={(e) => setLayoutTheme(e.target.value as LayoutTheme)}
+            >
+              <option value="default">{t('layout.default')}</option>
+              <option value="fantasy">{t('layout.fantasy')}</option>
+              <option value="cyberpunk">{t('layout.cyberpunk')}</option>
+              <option value="knight">{t('layout.knight')}</option>
+            </select>
+            <p className="mt-1 text-xs text-stone-500">{t('layout.help')}</p>
+          </div>
           <div>
             <div className="mb-2 flex justify-between">
               <span className="label mb-0">Event sequence</span>
@@ -138,6 +164,21 @@ export default function CampaignsPage() {
                     </>
                   )}
                 </div>
+              </div>
+              <div className="mt-2 max-w-xs">
+                <label className="label" htmlFor={`theme-${c.id}`}>{t('layout.label')}</label>
+                <select
+                  id={`theme-${c.id}`}
+                  className="input"
+                  value={c.layout_theme || 'default'}
+                  onChange={(e) => updateTheme(c.id, e.target.value as LayoutTheme)}
+                  disabled={c.status === 'completed'}
+                >
+                  <option value="default">{t('layout.default')}</option>
+                  <option value="fantasy">{t('layout.fantasy')}</option>
+                  <option value="cyberpunk">{t('layout.cyberpunk')}</option>
+                  <option value="knight">{t('layout.knight')}</option>
+                </select>
               </div>
               <p className="mt-1 text-xs text-stone-500">{c.nodes.map((n) => n.event_name).join(' → ')}</p>
             </div>

@@ -6,9 +6,25 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import get_current_user, require_master
 from app.database import get_db
 from app.models import Campaign, CampaignEventNode, EventTemplate, Group, User
-from app.schemas import AppendCampaignNodeRequest, AppendCampaignNodeResponse, CampaignCreate, CampaignNodeCreate, CampaignOut
+from app.schemas import (
+    AppendCampaignNodeRequest,
+    AppendCampaignNodeResponse,
+    CampaignCreate,
+    CampaignLayoutThemeUpdate,
+    CampaignNodeCreate,
+    CampaignOut,
+)
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+
+ALLOWED_LAYOUT_THEMES = frozenset({"default", "fantasy", "cyberpunk", "knight"})
+
+
+def _normalize_layout_theme(value: str | None) -> str:
+    theme = (value or "default").strip().lower()
+    if theme not in ALLOWED_LAYOUT_THEMES:
+        raise HTTPException(status_code=400, detail=f"layout_theme must be one of: {', '.join(sorted(ALLOWED_LAYOUT_THEMES))}")
+    return theme
 
 
 def _serialize_campaign(db: Session, campaign: Campaign) -> CampaignOut:
@@ -31,6 +47,7 @@ def _serialize_campaign(db: Session, campaign: Campaign) -> CampaignOut:
         group_id=campaign.group_id,
         status=campaign.status,
         current_node_id=campaign.current_node_id,
+        layout_theme=getattr(campaign, "layout_theme", None) or "default",
         nodes=nodes,
     )
 
@@ -58,7 +75,13 @@ def create_campaign(
     group = db.get(Group, payload.group_id)
     if not group or group.master_id != master.id:
         raise HTTPException(status_code=404, detail="Group not found")
-    campaign = Campaign(name=payload.name, group_id=payload.group_id, master_id=master.id, status="draft")
+    campaign = Campaign(
+        name=payload.name,
+        group_id=payload.group_id,
+        master_id=master.id,
+        status="draft",
+        layout_theme=_normalize_layout_theme(payload.layout_theme),
+    )
     db.add(campaign)
     db.flush()
     for node in payload.nodes:
@@ -72,6 +95,25 @@ def create_campaign(
         )
     db.commit()
     campaign = db.query(Campaign).options(joinedload(Campaign.nodes)).filter(Campaign.id == campaign.id).first()
+    return _serialize_campaign(db, campaign)
+
+
+@router.patch("/{campaign_id}/layout-theme", response_model=CampaignOut)
+async def update_layout_theme(
+    campaign_id: int,
+    payload: CampaignLayoutThemeUpdate,
+    master: Annotated[User, Depends(require_master)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CampaignOut:
+    from app.services.campaign_engine import broadcast_campaign_state
+
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign or campaign.master_id != master.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    campaign.layout_theme = _normalize_layout_theme(payload.layout_theme)
+    db.commit()
+    campaign = db.query(Campaign).options(joinedload(Campaign.nodes)).filter(Campaign.id == campaign_id).first()
+    await broadcast_campaign_state(db, campaign_id)
     return _serialize_campaign(db, campaign)
 
 
