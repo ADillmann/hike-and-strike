@@ -6,12 +6,62 @@ import {
   CrossedSwords,
   CyberCorner,
   CyberHex,
+  DiceIcon,
   FrameCorner,
   KnightCorner,
   KnightShield,
+  MasterCorner,
 } from './layoutOrnaments';
 
 const THEMED_LAYOUTS: ReadonlySet<LayoutTheme> = new Set(['fantasy', 'cyberpunk', 'knight']);
+
+function CornerSet({
+  variant,
+  accentClass,
+}: {
+  variant: 'fantasy' | 'cyberpunk' | 'knight' | 'master';
+  accentClass: string;
+}) {
+  const cornerClass = `pointer-events-none absolute ${accentClass}`;
+  if (variant === 'cyberpunk') {
+    return (
+      <>
+        <CyberCorner className={`${cornerClass} left-2 top-2`} />
+        <CyberCorner className={`${cornerClass} right-2 top-2`} flipX />
+        <CyberCorner className={`${cornerClass} bottom-2 left-2`} flipY />
+        <CyberCorner className={`${cornerClass} bottom-2 right-2`} flipX flipY />
+      </>
+    );
+  }
+  if (variant === 'knight') {
+    return (
+      <>
+        <KnightCorner className={`${cornerClass} left-1 top-1`} />
+        <KnightCorner className={`${cornerClass} right-1 top-1`} flipX />
+        <KnightCorner className={`${cornerClass} bottom-1 left-1`} flipY />
+        <KnightCorner className={`${cornerClass} bottom-1 right-1`} flipX flipY />
+      </>
+    );
+  }
+  if (variant === 'master') {
+    return (
+      <>
+        <MasterCorner className={`${cornerClass} left-1 top-1`} />
+        <MasterCorner className={`${cornerClass} right-1 top-1`} flipX />
+        <MasterCorner className={`${cornerClass} bottom-1 left-1`} flipY />
+        <MasterCorner className={`${cornerClass} bottom-1 right-1`} flipX flipY />
+      </>
+    );
+  }
+  return (
+    <>
+      <FrameCorner className={`${cornerClass} left-1 top-1`} />
+      <FrameCorner className={`${cornerClass} right-1 top-1`} flipX />
+      <FrameCorner className={`${cornerClass} bottom-1 left-1`} flipY />
+      <FrameCorner className={`${cornerClass} bottom-1 right-1`} flipX flipY />
+    </>
+  );
+}
 
 export function Layout({ children, title }: { children: React.ReactNode; title?: string }) {
   const { user, logout } = useAuth();
@@ -22,21 +72,27 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
   const fantasyPlayer = themedPlayer && layoutTheme === 'fantasy';
   const cyberPlayer = themedPlayer && layoutTheme === 'cyberpunk';
   const knightPlayer = themedPlayer && layoutTheme === 'knight';
+  const framed = isMaster || themedPlayer;
 
-  const accentClass = cyberPlayer
-    ? 'text-cyan-400'
-    : knightPlayer
-      ? 'text-slate-300'
-      : 'text-dungeon-400';
-  const brandClass = cyberPlayer
-    ? 'text-cyan-300'
-    : knightPlayer
-      ? 'text-slate-200'
-      : 'text-dungeon-300';
+  const accentClass = isMaster
+    ? 'text-dungeon-400'
+    : cyberPlayer
+      ? 'text-cyan-400'
+      : knightPlayer
+        ? 'text-slate-300'
+        : 'text-dungeon-400';
+  const brandClass = isMaster
+    ? 'text-dungeon-300'
+    : cyberPlayer
+      ? 'text-cyan-300'
+      : knightPlayer
+        ? 'text-slate-200'
+        : 'text-dungeon-300';
 
   const brandAndNav = (
     <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
+        {isMaster && <DiceIcon className={`shrink-0 ${accentClass}`} />}
         {fantasyPlayer && <CrossedSwords className={`shrink-0 ${accentClass}`} />}
         {cyberPlayer && <CyberHex className={`shrink-0 ${accentClass}`} />}
         {knightPlayer && <KnightShield className={`shrink-0 ${accentClass}`} />}
@@ -75,6 +131,7 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
         <Link className="hover:text-dungeon-300" to="/account">{t('common.account')}</Link>
         <span className="text-stone-400">{user?.username}</span>
         <button className="btn-secondary text-sm" onClick={logout}>{t('common.logout')}</button>
+        {isMaster && <DiceIcon className={`ml-1 shrink-0 ${accentClass}`} />}
         {fantasyPlayer && <CrossedSwords className={`ml-1 shrink-0 ${accentClass}`} />}
         {cyberPlayer && <CyberHex className={`ml-1 shrink-0 ${accentClass}`} />}
         {knightPlayer && <KnightShield className={`ml-1 shrink-0 ${accentClass}`} />}
@@ -82,105 +139,58 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
     </div>
   );
 
-  const headerClass = fantasyPlayer
-    ? 'layout-header-fantasy relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+  const headerClass = isMaster
+    ? 'layout-header-master relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+    : fantasyPlayer
+      ? 'layout-header-fantasy relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+      : cyberPlayer
+        ? 'layout-header-cyberpunk relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+        : knightPlayer
+          ? 'layout-header-knight relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+          : 'border-b border-dungeon-700 bg-dungeon-800 px-4 py-3';
+
+  const shellClass = isMaster
+    ? 'layout-shell-master'
+    : fantasyPlayer
+      ? 'layout-shell-fantasy'
+      : cyberPlayer
+        ? 'layout-shell-cyberpunk'
+        : knightPlayer
+          ? 'layout-shell-knight'
+          : '';
+
+  const mainFrameClass = isMaster
+    ? 'layout-main-master'
+    : fantasyPlayer
+      ? 'layout-main-fantasy'
+      : cyberPlayer
+        ? 'layout-main-cyberpunk'
+        : knightPlayer
+          ? 'layout-main-knight'
+          : '';
+
+  const cornerVariant = isMaster
+    ? 'master' as const
     : cyberPlayer
-      ? 'layout-header-cyberpunk relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
+      ? 'cyberpunk' as const
       : knightPlayer
-        ? 'layout-header-knight relative mx-3 mt-3 mb-1 px-4 py-3 sm:mx-4'
-        : 'border-b border-dungeon-700 bg-dungeon-800 px-4 py-3';
+        ? 'knight' as const
+        : 'fantasy' as const;
 
-  const shellClass = fantasyPlayer
-    ? 'layout-shell-fantasy'
-    : cyberPlayer
-      ? 'layout-shell-cyberpunk'
-      : knightPlayer
-        ? 'layout-shell-knight'
-        : '';
-
-  const mainFrameClass = fantasyPlayer
-    ? 'layout-main-fantasy'
-    : cyberPlayer
-      ? 'layout-main-cyberpunk'
-      : knightPlayer
-        ? 'layout-main-knight'
-        : '';
-
-  const cornerAccent = cyberPlayer
-    ? 'text-cyan-400'
-    : knightPlayer
-      ? 'text-slate-300'
-      : 'text-dungeon-400';
-
-  const renderMainCorners = () => {
-    if (fantasyPlayer) {
-      return (
-        <>
-          <FrameCorner className={`pointer-events-none absolute left-1 top-1 ${cornerAccent}`} />
-          <FrameCorner className={`pointer-events-none absolute right-1 top-1 ${cornerAccent}`} flipX />
-          <FrameCorner className={`pointer-events-none absolute bottom-1 left-1 ${cornerAccent}`} flipY />
-          <FrameCorner className={`pointer-events-none absolute bottom-1 right-1 ${cornerAccent}`} flipX flipY />
-        </>
-      );
-    }
-    if (cyberPlayer) {
-      return (
-        <>
-          <CyberCorner className={`pointer-events-none absolute left-2 top-2 ${cornerAccent}`} />
-          <CyberCorner className={`pointer-events-none absolute right-2 top-2 ${cornerAccent}`} flipX />
-          <CyberCorner className={`pointer-events-none absolute bottom-2 left-2 ${cornerAccent}`} flipY />
-          <CyberCorner className={`pointer-events-none absolute bottom-2 right-2 ${cornerAccent}`} flipX flipY />
-        </>
-      );
-    }
-    if (knightPlayer) {
-      return (
-        <>
-          <KnightCorner className={`pointer-events-none absolute left-1 top-1 ${cornerAccent}`} />
-          <KnightCorner className={`pointer-events-none absolute right-1 top-1 ${cornerAccent}`} flipX />
-          <KnightCorner className={`pointer-events-none absolute bottom-1 left-1 ${cornerAccent}`} flipY />
-          <KnightCorner className={`pointer-events-none absolute bottom-1 right-1 ${cornerAccent}`} flipX flipY />
-        </>
-      );
-    }
-    return null;
-  };
+  const dataLayout = isMaster ? 'master' : themedPlayer ? layoutTheme : 'default';
 
   return (
     <div
       className={`min-h-screen ${shellClass}`.trim()}
-      data-layout={themedPlayer ? layoutTheme : 'default'}
+      data-layout={dataLayout}
     >
       <header className={headerClass}>
-        {fantasyPlayer && (
-          <>
-            <FrameCorner className="pointer-events-none absolute left-1 top-1 text-dungeon-400" />
-            <FrameCorner className="pointer-events-none absolute right-1 top-1 text-dungeon-400" flipX />
-            <FrameCorner className="pointer-events-none absolute bottom-1 left-1 text-dungeon-400" flipY />
-            <FrameCorner className="pointer-events-none absolute bottom-1 right-1 text-dungeon-400" flipX flipY />
-          </>
-        )}
-        {cyberPlayer && (
-          <>
-            <CyberCorner className="pointer-events-none absolute left-2 top-2 text-cyan-400" />
-            <CyberCorner className="pointer-events-none absolute right-2 top-2 text-cyan-400" flipX />
-            <CyberCorner className="pointer-events-none absolute bottom-2 left-2 text-cyan-400" flipY />
-            <CyberCorner className="pointer-events-none absolute bottom-2 right-2 text-cyan-400" flipX flipY />
-          </>
-        )}
-        {knightPlayer && (
-          <>
-            <KnightCorner className="pointer-events-none absolute left-1 top-1 text-slate-300" />
-            <KnightCorner className="pointer-events-none absolute right-1 top-1 text-slate-300" flipX />
-            <KnightCorner className="pointer-events-none absolute bottom-1 left-1 text-slate-300" flipY />
-            <KnightCorner className="pointer-events-none absolute bottom-1 right-1 text-slate-300" flipX flipY />
-          </>
-        )}
+        {framed && <CornerSet variant={cornerVariant} accentClass={accentClass} />}
         {brandAndNav}
       </header>
-      {themedPlayer ? (
+      {framed ? (
         <div className={`relative mx-3 mb-4 mt-2 p-3 sm:mx-4 sm:p-4 ${mainFrameClass}`}>
-          {renderMainCorners()}
+          <CornerSet variant={cornerVariant} accentClass={accentClass} />
           <main className="relative z-[1] mx-auto max-w-6xl">{children}</main>
         </div>
       ) : (

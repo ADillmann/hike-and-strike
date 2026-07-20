@@ -220,3 +220,64 @@ export function KnightCorner({ className = '', flipX, flipY }: { className?: str
     </svg>
   );
 }
+
+/** D6 face accent for master/organizer chrome. */
+export function DiceIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 40 40"
+      width="26"
+      height="26"
+      aria-hidden="true"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect
+        x="7"
+        y="7"
+        width="26"
+        height="26"
+        rx="3.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <circle cx="14" cy="14" r="2" fill="currentColor" />
+      <circle cx="26" cy="14" r="2" fill="currentColor" />
+      <circle cx="20" cy="20" r="2" fill="currentColor" />
+      <circle cx="14" cy="26" r="2" fill="currentColor" />
+      <circle cx="26" cy="26" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Corner flourish with a tiny die for master frames. */
+export function MasterCorner({ className = '', flipX, flipY }: { className?: string; flipX?: boolean; flipY?: boolean }) {
+  const transform = [
+    flipX ? 'scaleX(-1)' : '',
+    flipY ? 'scaleY(-1)' : '',
+  ].filter(Boolean).join(' ');
+
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      aria-hidden="true"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={transform ? { transform } : undefined}
+    >
+      <path
+        d="M3 21 V8 Q3 3 8 3 H21"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <rect x="5.5" y="5.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="7.5" cy="7.5" r="0.9" fill="currentColor" />
+      <circle cx="10.5" cy="10.5" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
