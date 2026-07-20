@@ -192,9 +192,9 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
 
 export function StatBadge({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded border border-dungeon-600 bg-dungeon-900 px-3 py-2 text-center">
+    <div className="stat-box rounded border px-3 py-2 text-center">
       <div className="text-xs uppercase text-stone-500">{label}</div>
-      <div className="text-lg font-semibold text-dungeon-300">{value}</div>
+      <div className="stat-box-value text-lg font-semibold">{value}</div>
     </div>
   );
 }
@@ -211,7 +211,7 @@ export function StatEditor({
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {statNames.map((s) => (
-        <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
+        <div key={s} className="stat-box flex items-center gap-2 rounded border p-2">
           <span className="flex-1 text-sm uppercase">{t(`stats.${s}`)}</span>
           <button className="btn-secondary px-2 py-1 text-sm" onClick={() => onChange(s, (stats[s] || 8) - 1)}>-</button>
           <span className="w-6 text-center">{stats[s] || 8}</span>

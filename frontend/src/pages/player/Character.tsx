@@ -222,7 +222,7 @@ export default function CharacterCreatePage() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             {STAT_NAMES.map((s) => (
-              <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
+              <div key={s} className="stat-box flex items-center gap-2 rounded border p-2">
                 <span className="flex-1 text-sm">{t(`stats.${s}`)}</span>
                 <button type="button" className="btn-secondary px-2 py-0.5 text-xs" onClick={() => adjust(s, -1)}>-</button>
                 <span>{stats[s]}</span>
@@ -413,7 +413,7 @@ export function CharacterSheetPage() {
               const cost = raiseCosts[s] ?? 0;
               const canRaise = cost > 0 && freePoints >= cost;
               return (
-                <div key={s} className="flex items-center gap-2 rounded border border-dungeon-600 p-2">
+                <div key={s} className="stat-box flex items-center gap-2 rounded border p-2">
                   <div className="flex-1">
                     <StatBadge label={t(`stats.${s}`)} value={eff[s] || current} />
                     <p className="text-center text-xs text-stone-500">

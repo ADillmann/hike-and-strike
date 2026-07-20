@@ -284,3 +284,205 @@ body {
   background-color: rgba(28, 32, 40, 0.94);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(200, 208, 220, 0.1);
 }
+
+/* —— Shared stat boxes (default = dungeon brown) —— */
+.stat-box {
+  border-color: #5c4a3a;
+  background-color: #1a1410;
+}
+
+.stat-box-value {
+  color: #e8c547;
+}
+
+/* —— Theme controls: buttons, inputs, accent text —— */
+[data-layout='fantasy'] .btn-primary {
+  background-color: #9a7a28;
+  color: #1a1410;
+}
+
+[data-layout='fantasy'] .btn-primary:hover {
+  background-color: #c4a574;
+}
+
+[data-layout='fantasy'] .btn-secondary {
+  border-color: #8a7348;
+  background-color: #3d3228;
+}
+
+[data-layout='fantasy'] .btn-secondary:hover {
+  background-color: #5c4a3a;
+}
+
+[data-layout='fantasy'] .input {
+  border-color: #8a7348;
+  background-color: #1a1510;
+}
+
+[data-layout='fantasy'] .stat-box {
+  border-color: rgba(138, 115, 72, 0.7);
+  background-color: rgba(26, 20, 14, 0.95);
+}
+
+[data-layout='fantasy'] .stat-box-value,
+[data-layout='fantasy'] .text-dungeon-300 {
+  color: #e8c547;
+}
+
+[data-layout='fantasy'] .text-dungeon-400 {
+  color: #c4a574;
+}
+
+[data-layout='fantasy'] a:hover {
+  color: #e8c547;
+}
+
+[data-layout='cyberpunk'] .btn-primary {
+  background-color: #2ec4c6;
+  color: #041018;
+}
+
+[data-layout='cyberpunk'] .btn-primary:hover {
+  background-color: #5ee0e2;
+}
+
+[data-layout='cyberpunk'] .btn-secondary {
+  border-color: rgba(46, 196, 198, 0.55);
+  background-color: #0c1c28;
+  color: #b8e8ea;
+}
+
+[data-layout='cyberpunk'] .btn-secondary:hover {
+  background-color: #143040;
+  border-color: #2ec4c6;
+}
+
+[data-layout='cyberpunk'] .input {
+  border-color: rgba(46, 196, 198, 0.45);
+  background-color: #060e16;
+}
+
+[data-layout='cyberpunk'] .stat-box {
+  border-color: rgba(46, 196, 198, 0.4);
+  background-color: rgba(6, 14, 22, 0.95);
+}
+
+[data-layout='cyberpunk'] .stat-box-value,
+[data-layout='cyberpunk'] .text-dungeon-300 {
+  color: #5ee0e2;
+}
+
+[data-layout='cyberpunk'] .text-dungeon-400 {
+  color: #2ec4c6;
+}
+
+[data-layout='cyberpunk'] a:hover {
+  color: #5ee0e2;
+}
+
+[data-layout='cyberpunk'] .border-dungeon-600,
+[data-layout='cyberpunk'] .border-dungeon-700,
+[data-layout='cyberpunk'] .border-dungeon-500 {
+  border-color: rgba(46, 196, 198, 0.35);
+}
+
+[data-layout='cyberpunk'] .border-dungeon-400 {
+  border-color: rgba(46, 196, 198, 0.7);
+}
+
+[data-layout='cyberpunk'] .bg-dungeon-900,
+[data-layout='cyberpunk'] .bg-dungeon-900\/50 {
+  background-color: rgba(6, 14, 22, 0.92);
+}
+
+[data-layout='cyberpunk'] .bg-dungeon-800,
+[data-layout='cyberpunk'] .bg-dungeon-800\/40 {
+  background-color: rgba(10, 22, 32, 0.9);
+}
+
+[data-layout='cyberpunk'] .bg-dungeon-700 {
+  background-color: #0c1c28;
+}
+
+[data-layout='cyberpunk'] .bg-dungeon-500 {
+  background-color: #2ec4c6;
+}
+
+[data-layout='cyberpunk'] .bg-dungeon-400 {
+  background-color: #5ee0e2;
+}
+
+[data-layout='knight'] .btn-primary {
+  background-color: #9aa3b2;
+  color: #12141a;
+}
+
+[data-layout='knight'] .btn-primary:hover {
+  background-color: #c8d0dc;
+}
+
+[data-layout='knight'] .btn-secondary {
+  border-color: rgba(154, 163, 178, 0.65);
+  background-color: #2a303a;
+  color: #e2e6ec;
+}
+
+[data-layout='knight'] .btn-secondary:hover {
+  background-color: #3a4250;
+  border-color: #9aa3b2;
+}
+
+[data-layout='knight'] .input {
+  border-color: rgba(154, 163, 178, 0.5);
+  background-color: #12141a;
+}
+
+[data-layout='knight'] .stat-box {
+  border-color: rgba(154, 163, 178, 0.5);
+  background-color: rgba(18, 20, 26, 0.95);
+}
+
+[data-layout='knight'] .stat-box-value,
+[data-layout='knight'] .text-dungeon-300 {
+  color: #c8d0dc;
+}
+
+[data-layout='knight'] .text-dungeon-400 {
+  color: #9aa3b2;
+}
+
+[data-layout='knight'] a:hover {
+  color: #c8d0dc;
+}
+
+[data-layout='knight'] .border-dungeon-600,
+[data-layout='knight'] .border-dungeon-700,
+[data-layout='knight'] .border-dungeon-500 {
+  border-color: rgba(154, 163, 178, 0.45);
+}
+
+[data-layout='knight'] .border-dungeon-400 {
+  border-color: rgba(154, 163, 178, 0.75);
+}
+
+[data-layout='knight'] .bg-dungeon-900,
+[data-layout='knight'] .bg-dungeon-900\/50 {
+  background-color: rgba(14, 16, 20, 0.92);
+}
+
+[data-layout='knight'] .bg-dungeon-800,
+[data-layout='knight'] .bg-dungeon-800\/40 {
+  background-color: rgba(28, 32, 40, 0.9);
+}
+
+[data-layout='knight'] .bg-dungeon-700 {
+  background-color: #2a303a;
+}
+
+[data-layout='knight'] .bg-dungeon-500 {
+  background-color: #9aa3b2;
+}
+
+[data-layout='knight'] .bg-dungeon-400 {
+  background-color: #c8d0dc;
+}
