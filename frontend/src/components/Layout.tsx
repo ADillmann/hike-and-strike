@@ -117,6 +117,7 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
             <Link className="hover:text-dungeon-300" to="/organizer/effects">Effects</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/secrets">Secrets</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/currency">Currency</Link>
+            <Link className="hover:text-dungeon-300" to="/organizer/settings-packs">Settings Packs</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/campaigns">Campaigns</Link>
           </>
         ) : (

@@ -359,6 +359,17 @@ def _ensure_creation_settings(db: Session) -> None:
 
 
 def seed_data(db: Session) -> None:
+    from app.services.settings_pack import custom_pack_active
+
+    # When a custom settings pack is applied, skip template seeding so restarts
+    # do not reintroduce default content over the loaded pack.
+    if custom_pack_active(db):
+        migrate_legacy_equipment(db)
+        migrate_skill_effect_types(db)
+        migrate_character_skills(db)
+        db.commit()
+        return
+
     if db.query(EventTemplate).filter(EventTemplate.is_generic == True).count() == 0:  # noqa: E712
         generic_events = [
             ("Bonfire", "A warm campfire. The party can rest and recover.", "rest"),
