@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLayoutTheme, type LayoutTheme } from '../context/LayoutThemeContext';
 import { useLocale } from '../context/LocaleContext';
@@ -14,6 +15,80 @@ import {
 } from './layoutOrnaments';
 
 const THEMED_LAYOUTS: ReadonlySet<LayoutTheme> = new Set(['fantasy', 'cyberpunk', 'knight']);
+
+function pathMatches(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function NavMenu({
+  label,
+  items,
+}: {
+  label: string;
+  items: { to: string; label: string; match?: string }[];
+}) {
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const childActive = items.some((item) => pathMatches(pathname, item.match || item.to));
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 hover:text-dungeon-300 ${childActive ? 'text-dungeon-300' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {label}
+        <span className="text-[0.65rem] text-stone-500" aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          className="absolute left-0 top-full z-30 mt-1 min-w-[11rem] rounded border border-dungeon-600 bg-dungeon-900 py-1 shadow-lg"
+        >
+          {items.map((item) => {
+            const active = pathMatches(pathname, item.match || item.to);
+            return (
+              <Link
+                key={item.to}
+                role="menuitem"
+                to={item.to}
+                className={`block px-3 py-1.5 hover:bg-dungeon-800 hover:text-dungeon-300 ${active ? 'text-dungeon-300' : 'text-stone-200'}`}
+                onClick={() => setOpen(false)}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CornerSet({
   variant,
@@ -107,9 +182,15 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
         {isMaster ? (
           <>
             <Link className="hover:text-dungeon-300" to="/organizer">Dashboard</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/users">Users</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/groups">Groups</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/events">Events</Link>
+            <NavMenu
+              label="Campaign"
+              items={[
+                { to: '/organizer/users', label: 'Users' },
+                { to: '/organizer/groups', label: 'Groups' },
+                { to: '/organizer/events', label: 'Events' },
+                { to: '/organizer/campaigns', label: 'Campaigns', match: '/organizer/campaigns' },
+              ]}
+            />
             <Link className="hover:text-dungeon-300" to="/organizer/items">Items</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/enemies">Enemies</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/skills">Skills</Link>
@@ -117,9 +198,13 @@ export function Layout({ children, title }: { children: React.ReactNode; title?:
             <Link className="hover:text-dungeon-300" to="/organizer/effects">Effects</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/secrets">Secrets</Link>
             <Link className="hover:text-dungeon-300" to="/organizer/currency">Currency</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/settings-packs">Settings Packs</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/campaign-packs">Campaign Packs</Link>
-            <Link className="hover:text-dungeon-300" to="/organizer/campaigns">Campaigns</Link>
+            <NavMenu
+              label="Export"
+              items={[
+                { to: '/organizer/settings-packs', label: 'Settings Packs' },
+                { to: '/organizer/campaign-packs', label: 'Campaign Packs' },
+              ]}
+            />
           </>
         ) : (
           <>
