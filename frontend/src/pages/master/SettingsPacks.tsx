@@ -198,14 +198,20 @@ export default function SettingsPacksPage() {
         </section>
 
         <section className="card space-y-3 lg:col-span-2">
-          <h2 className="font-semibold text-dungeon-300">Load from GitHub (destructive)</h2>
+          <h2 className="font-semibold text-dungeon-300">Load from remote repository (destructive)</h2>
           <p className="text-sm text-stone-400">
-            Fetches pack.json and related files from a branch (e.g. fantasy / cyberpunk / knight). Same wipe rules as directory import.
+            Fetches pack.json and related files from a branch on GitHub, GitLab, or Gitea/Forgejo/Codeberg-style hosts.
+            Same wipe rules as directory import.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="label">Repository (owner/name)</label>
-              <input className="input" placeholder="ADillmann/hike-and-strike-settings" value={repo} onChange={(e) => setRepo(e.target.value)} />
+            <div className="sm:col-span-2">
+              <label className="label">Repository URL</label>
+              <input
+                className="input font-mono text-sm"
+                placeholder="https://github.com/ADillmann/hike-and-strike-settings"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">Branch</label>
@@ -219,9 +225,9 @@ export default function SettingsPacksPage() {
             </div>
             <div>
               <label className="label">Path prefix (optional)</label>
-              <input className="input" placeholder="settings-pack" value={pathPrefix} onChange={(e) => setPathPrefix(e.target.value)} />
+              <input className="input" placeholder="leave empty if pack files are at repo root" value={pathPrefix} onChange={(e) => setPathPrefix(e.target.value)} />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="label">Token (optional, private repos)</label>
               <input className="input" type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
             </div>
@@ -233,7 +239,7 @@ export default function SettingsPacksPage() {
             onChange={(e) => setGithubConfirm(e.target.value)}
           />
           <button type="button" className="btn-danger" disabled={busy || !repo || !branch} onClick={importGithub}>
-            Load from GitHub and replace
+            Load from repository and replace
           </button>
         </section>
       </div>

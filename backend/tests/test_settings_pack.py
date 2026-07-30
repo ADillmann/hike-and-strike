@@ -82,3 +82,40 @@ def test_export_import_directory_roundtrip_remaps_names(db, tmp_path: Path):
     before_items = db.query(ItemTemplate).count()
     seed_data(db)
     assert db.query(ItemTemplate).count() == before_items
+
+
+def test_parse_remote_repo_urls():
+    gh = packs.parse_remote_repo("https://github.com/ADillmann/hike-and-strike-settings.git")
+    assert gh["forge"] == "github"
+    assert gh["project_path"] == "ADillmann/hike-and-strike-settings"
+    assert packs.raw_pack_file_url(
+        forge="github",
+        host="github.com",
+        project_path=gh["project_path"],
+        branch="knight",
+        rel_path="pack.json",
+    ) == "https://raw.githubusercontent.com/ADillmann/hike-and-strike-settings/knight/pack.json"
+
+    shorthand = packs.parse_remote_repo("ADillmann/hike-and-strike-settings")
+    assert shorthand["forge"] == "github"
+    assert shorthand["project_path"] == "ADillmann/hike-and-strike-settings"
+
+    gl = packs.parse_remote_repo("https://gitlab.com/group/my-settings")
+    assert gl["forge"] == "gitlab"
+    assert packs.raw_pack_file_url(
+        forge="gitlab",
+        host="gitlab.com",
+        project_path="group/my-settings",
+        branch="main",
+        rel_path="classes.json",
+    ) == "https://gitlab.com/group/my-settings/-/raw/main/classes.json"
+
+    cb = packs.parse_remote_repo("https://codeberg.org/user/settings-pack")
+    assert cb["forge"] == "gitea"
+    assert packs.raw_pack_file_url(
+        forge="gitea",
+        host="codeberg.org",
+        project_path="user/settings-pack",
+        branch="knight",
+        rel_path="items.json",
+    ) == "https://codeberg.org/user/settings-pack/raw/branch/knight/items.json"

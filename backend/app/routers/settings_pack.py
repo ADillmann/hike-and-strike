@@ -24,12 +24,16 @@ class PathImportRequest(BaseModel):
     confirm: str
 
 
-class GitHubImportRequest(BaseModel):
-    repo: str = Field(..., description="owner/name")
+class RemoteImportRequest(BaseModel):
+    repo: str = Field(..., description="Full repository URL (or GitHub owner/name shorthand)")
     branch: str
     token: str | None = None
     path_prefix: str = ""
     confirm: str
+
+
+# Keep old name for any external callers / OpenAPI stability
+GitHubImportRequest = RemoteImportRequest
 
 
 @router.get("/status")
@@ -92,15 +96,16 @@ def import_pack_path(
 
 
 @router.post("/import-github")
-def import_pack_github(
-    payload: GitHubImportRequest,
+@router.post("/import-remote")
+def import_pack_remote(
+    payload: RemoteImportRequest,
     master: Annotated[User, Depends(require_master)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
     if payload.confirm != packs.CONFIRM_REPLACE:
         raise HTTPException(status_code=400, detail=f'confirm must be "{packs.CONFIRM_REPLACE}"')
     try:
-        files = packs.fetch_pack_from_github(
+        files = packs.fetch_pack_from_remote(
             repo=payload.repo,
             branch=payload.branch,
             token=payload.token,

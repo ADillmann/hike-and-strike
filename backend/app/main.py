@@ -24,6 +24,7 @@ from app.routers import (
     items,
     player_campaign,
     secrets,
+    campaign_pack,
     settings_pack,
     skills,
     users,
@@ -94,6 +95,7 @@ api.include_router(effects.router)
 api.include_router(secrets.router)
 api.include_router(currency.router)
 api.include_router(settings_pack.router)
+api.include_router(campaign_pack.router)
 api.include_router(campaigns.router)
 api.include_router(campaign_runtime.router)
 api.include_router(player_campaign.router)
