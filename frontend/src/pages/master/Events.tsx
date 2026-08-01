@@ -3,6 +3,7 @@ import { api } from '../../api/client';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ImageUpload } from '../../components/ImageUpload';
 import { Layout } from '../../components/Layout';
+import { MarkdownText } from '../../components/MarkdownText';
 import { EffectTemplate, EventOutcomeRewardBuilder } from '../../components/RewardsPanel';
 
 interface EventTemplate {
@@ -238,6 +239,9 @@ export default function EventsPage() {
           <h2 className="font-semibold text-dungeon-300">New Event</h2>
           <input className="input" placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <textarea className="input min-h-24" placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <p className="text-xs text-stone-500">
+            Markdown supported: **bold**, *italic*, lists, blank lines for paragraphs.
+          </p>
           <select className="input" value={form.event_type} onChange={(e) => setForm({ ...form, event_type: e.target.value })}>
             <option value="story">Story</option>
             <option value="puzzle">Puzzle</option>
@@ -304,7 +308,9 @@ export default function EventsPage() {
                   <span className="font-medium">{ev.name}</span>
                   <span className="text-xs text-stone-500">{ev.event_type}{ev.is_generic ? ' (generic)' : ''}</span>
                 </div>
-                <p className="mt-1 text-sm text-stone-400">{ev.description}</p>
+                <div className="mt-1 text-sm text-stone-400">
+                  <MarkdownText>{ev.description}</MarkdownText>
+                </div>
                 {ev.images?.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {ev.images.map((img, i) => (
@@ -338,6 +344,9 @@ export default function EventsPage() {
             </h3>
             <input className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             <textarea className="input min-h-24" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+            <p className="text-xs text-stone-500">
+              Markdown supported: **bold**, *italic*, lists, blank lines for paragraphs.
+            </p>
             <select className="input" value={editing.event_type} onChange={(e) => setEditing({
               ...editing,
               event_type: e.target.value,

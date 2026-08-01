@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { Layout } from '../../components/Layout';
+import { MarkdownText } from '../../components/MarkdownText';
 import { ShopModal } from '../../components/shop/ShopModal';
 import { useCampaignSocket } from '../../hooks/useCampaignSocket';
 import { useLocale } from '../../context/LocaleContext';
@@ -105,7 +106,7 @@ export default function CampaignPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <section className="card md:col-span-2">
           <h2 className="mb-2 text-xl font-semibold text-dungeon-300">{data.current_node?.event.name}</h2>
-          <p className="whitespace-pre-wrap text-stone-300">{data.current_node?.event.description}</p>
+          <MarkdownText>{data.current_node?.event.description}</MarkdownText>
           {data.current_node?.event.images && data.current_node.event.images.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {data.current_node.event.images.map((img, i) => (

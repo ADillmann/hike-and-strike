@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, Character, REWARDS_BLOCKED_DURING_BATTLE } from '../../api/client';
 import { Layout } from '../../components/Layout';
+import { MarkdownText } from '../../components/MarkdownText';
 import { PartyCharacterEditModal } from '../../components/PartyCharacterEditModal';
 import { BattleGrid, cycleTerrainType, GridActor, isImpassableTerrain, MAX_BATTLE_GRID, MIN_BATTLE_GRID, normalizeTerrainCells, suggestedGridSize, TerrainCell } from '../../components/BattleGrid';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -268,7 +269,7 @@ export default function CampaignControlPage() {
             Current: {state.current_node?.event.name || '—'}
           </h2>
           <p className="mb-2 text-xs text-stone-500">{state.current_node?.event.event_type}</p>
-          <p className="whitespace-pre-wrap text-stone-300">{state.current_node?.event.description}</p>
+          <MarkdownText>{state.current_node?.event.description}</MarkdownText>
           {state.current_node?.event.images && state.current_node.event.images.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {state.current_node.event.images.map((img, i) => (
